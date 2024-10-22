@@ -1,5 +1,5 @@
 from django.contrib import admin
-from sessionbot.models import TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings,Todo
+from sessionbot.models import TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings, Task,Todo
 import json
 admin.site.register(EmailProvider)
 admin.site.register(TargetSettings)
@@ -42,11 +42,16 @@ class SessionBotAdmin(AdminChangeLinksMixin,
 admin.site.register(ChildBot,SessionBotAdmin)
 admin.site.register(Server)
 
+class TaskAdmin(admin.ModelAdmin):
+    list_display = ['uuid', 'status', 'service', 'ref_id'] 
+
+admin.site.register(Task, TaskAdmin)
+
     
 admin.site.register(Device)
 
 class BulkCampaignAdmin(admin.ModelAdmin):
-    filter_horizontal = ('childbots','devices','scrape_tasks','proxies','demographic','messaging','settings','sharing')
+    filter_horizontal = ('childbots','devices','scrape_tasks','proxies')
 
 # Register your models here.
 class ScrapeTaskAdmin(admin.ModelAdmin):

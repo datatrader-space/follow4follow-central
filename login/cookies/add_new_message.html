@@ -1,0 +1,244 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block extra_head %}
+<!-- Additional CSS if needed -->
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="page-content">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-xxl-6">
+                    <div class="card">
+                        <div class="card-header align-items-center d-flex">
+                            <h4 class="card-title mb-0 flex-grow-1">Add Messages</h4>
+                            <!-- Upload Button and Modal -->
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <button type="button" class="btn btn-success mb-3" data-bs-toggle="modal" data-bs-target="#messagingPopup">
+                                        <i class="ri-upload-line"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div><!-- end card header -->
+
+                        <div class="card-body">
+                            <form id="addMessagingForm" class="needs-validation" novalidate>
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="nameInput" class="form-label">Name</label>
+                                        <input type="text" class="form-control" id="nameInput" placeholder="Enter entry name" required>
+                                        <div class="invalid-feedback">Please enter the entry name.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="commentListInput" class="form-label">Comment List</label>
+                                        <input type="text" class="form-control" id="commentListInput" placeholder="Enter comment list" required>
+                                        <div class="invalid-feedback">Please enter the comment list.</div>
+                                    </div>
+                                </div>
+                        
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="influencerProfileInput" class="form-label">Influencer Profile</label>
+                                        <input type="text" class="form-control" id="influencerProfileInput" placeholder="Enter influencer profile" required>
+                                        <div class="invalid-feedback">Please enter the influencer profile.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="welcomeMessageInput" class="form-label">Welcome Message</label>
+                                        <input type="text" class="form-control" id="welcomeMessageInput" placeholder="Enter welcome message" required>
+                                        <div class="invalid-feedback">Please enter the welcome message.</div>
+                                    </div>
+                                </div>
+                        
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="followupMessageInput" class="form-label">Follow-up Message</label>
+                                        <input type="text" class="form-control" id="followupMessageInput" placeholder="Enter follow-up message" required>
+                                        <div class="invalid-feedback">Please enter the follow-up message.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="reachoutMessageInput" class="form-label">Reach-out Message</label>
+                                        <input type="text" class="form-control" id="reachoutMessageInput" placeholder="Enter reach-out message" required>
+                                        <div class="invalid-feedback">Please enter the reach-out message.</div>
+                                    </div>
+                                </div>
+                        
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="responseToReachoutMessageInput" class="form-label">Response to Reach-out Message</label>
+                                        <input type="text" class="form-control" id="responseToReachoutMessageInput" placeholder="Enter response to reach-out message" required>
+                                        <div class="invalid-feedback">Please enter the response to the reach-out message.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="targetHashtagInput" class="form-label">Target Hashtag</label>
+                                        <input type="text" class="form-control" id="targetHashtagInput" placeholder="Enter target hashtag" required>
+                                        <div class="invalid-feedback">Please enter the target hashtag.</div>
+                                    </div>
+                                </div>
+                        
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="targetLocationInput" class="form-label">Target Location</label>
+                                        <input type="text" class="form-control" id="targetLocationInput" placeholder="Enter target location" required>
+                                        <div class="invalid-feedback">Please enter the target location.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="messageListInput" class="form-label">Message List</label>
+                                        <textarea class="form-control" id="messageListInput" rows="3" placeholder="Enter message list" required></textarea>
+                                        <div class="invalid-feedback">Please enter the message list.</div>
+                                    </div>
+                                </div>
+                        
+                                <div class="text-end mt-3">
+                                    <button type="submit" class="btn btn-primary">Save</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Upload Messaging Popup Modal -->
+                        <div class="modal fade" id="messagingPopup" tabindex="-1" aria-labelledby="messagingPopupLabel" aria-hidden="true">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="messagingPopupLabel">Upload Messaging Entries</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <form id="messagingUploadForm" enctype="multipart/form-data">
+                                            <div class="mb-3">
+                                                <label for="messaging-google-sheet-link" class="form-label d-flex align-items-center">
+                                                    <i class="ri-google-fill me-2" style="font-size: 1.5rem;"></i> Google Sheet Link
+                                                </label>
+                                                <input type="url" class="form-control" id="messaging-google-sheet-link" placeholder="Enter Google Sheet URL" required>
+                                                <div class="invalid-feedback">Please enter a valid Google Sheet URL.</div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <p><strong>Mandatory Headers:</strong> [ "name", "comment_list", "influencer_profile", "welcome_message", "followup_message", "reachout_message", "response_to_reachout_message", "target_hashtag", "target_location", "message_list" ]</p>
+                                            </div>
+                                        </form>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                        <button type="button" class="btn btn-primary" id="messagingUploadButton">Upload</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- End Upload Messaging Popup Modal -->
+                    </div>
+                </div> <!-- end col -->
+            </div>
+        </div> <!-- container-fluid -->
+    </div> <!-- page-content -->
+</div>
+<!-- end main content-->
+
+<!-- Congrats Popup Modal -->
+<div class="modal fade" id="congratsPopup" tabindex="-1" aria-labelledby="congratsPopupLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <div class="mb-4">
+                    <lord-icon src="https://cdn.lordicon.com/lupuorrc.json" trigger="loop" colors="primary:#212529,secondary:#405189" style="width:120px;height:120px"></lord-icon>
+                </div>
+                <h5>Form information saved successfully!</h5>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <a href="{% url 'view_message_logs' %}" class="btn btn-primary">View Logs</a>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- End Congrats Popup Modal -->
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const form = document.getElementById('addMessagingForm');
+        const congratsPopup = new bootstrap.Modal(document.getElementById('congratsPopup'));
+        const messagingEndpoint = "{{ messaging_endpoint }}";
+        const uploadEndpoint = "{{ upload_endpoint }}";
+
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+
+            const data = {
+                name: document.getElementById('nameInput').value,
+                comment_list: document.getElementById('commentListInput').value,
+                influencer_profile: document.getElementById('influencerProfileInput').value,
+                welcome_message: document.getElementById('welcomeMessageInput').value,
+                followup_message: document.getElementById('followupMessageInput').value,
+                reachout_message: document.getElementById('reachoutMessageInput').value,
+                response_to_reachout_message: document.getElementById('responseToReachoutMessageInput').value,
+                target_hashtag: document.getElementById('targetHashtagInput').value,
+                target_location: document.getElementById('targetLocationInput').value,
+                message_list: document.getElementById('messageListInput').value
+            };
+
+            console.log('Submitting messaging form with data:', data);
+
+            fetch(messagingEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Basic ' + btoa('jeni:jeni@123')
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Success:', data);
+                form.reset();
+                congratsPopup.show();
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                alert('Error saving the messaging information! Check the console for details.');
+            });
+        });
+
+        const uploadForm = document.getElementById('messagingUploadForm');
+        const uploadPopup = new bootstrap.Modal(document.getElementById('messagingPopup'));
+        const messagingUploadButton = document.getElementById('messagingUploadButton');
+
+        messagingUploadButton.addEventListener('click', () => {
+            const sheetLink = document.getElementById('messaging-google-sheet-link').value;
+            const payload = {
+                "sheet_link": sheetLink,
+                "resource_type": "messaging",
+                "request_id": "xyz789"
+            };
+
+            console.log('Uploading with payload:', payload);
+
+            fetch(uploadEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Basic ' + btoa('jeni:jeni@123')
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                console.log('Upload response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Upload success:', data);
+                uploadPopup.hide();
+                congratsPopup.show();
+            })
+            .catch((error) => {
+                console.error('Upload error:', error);
+                alert('Error uploading the data! Check the console for details.');
+            });
+        });
+    });
+</script>
+
+{% endblock %}

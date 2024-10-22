@@ -28,6 +28,20 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://a8d8-2603-3-6100-250-00.ngrok-free.app/",
+    "http://127.0.0.1:8000",
+    "http://localhost",
+]
+
+CORS_ALLOWED_ORIGINS = [
+    "https://a8d8-2603-3-6100-250-00.ngrok-free.app/",
+    "http://127.0.0.1:8000",
+    "http://localhost",
+]
+
+CORS_ALLOW_ALL_ORIGINS = True
+
 
 # Application definition
 
@@ -42,13 +56,16 @@ INSTALLED_APPS = [
     'django_celery_results',
     'sessionbot',
     'customer',
-    'rest_framework'
+    'corsheaders',
+    'rest_framework',
+    'django_jsonform'
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -68,6 +85,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'django.template.context_processors.media',
             ],
         },
     },
@@ -78,7 +96,19 @@ WSGI_APPLICATION = 'vividmind.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/3.2/ref/settings/#databases
-
+''' 
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql_psycopg2',
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST'),
+        'PORT': '5432',
+        #'ATOMIC_REQUESTS': True,
+    }
+}
+'''
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -166,3 +196,9 @@ else:
     STATICFILES_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
     STATIC_URL = "https://%s/%s/" % (AWS_S3_CUSTOM_DOMAIN, AWS_LOCATION)
     DEFAULT_FILE_STORAGE = 'sessionbot.storage_backends.PublicMediaStorage'
+
+CORS_ALLOWED_ORIGINS = [
+    "http://127.0.0.1:8000",
+    "http://localhost",
+    
+]

@@ -1,0 +1,271 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.2.9/css/responsive.bootstrap.min.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css">
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="page-content">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-xxl-6">
+                    <div class="card">
+                        <div class="card-header align-items-center d-flex">
+                            <h4 class="card-title mb-0 flex-grow-1">Add Scrape Task</h4>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <button type="button" class="btn btn-success mb-3" data-bs-toggle="modal" data-bs-target="#scrapeTaskPopup">
+                                        <i class="ri-upload-line"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card-body">
+                            <form id="scrapeTaskForm">
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="serviceInput" class="form-label">Service</label>
+                                        <input type="text" class="form-control" id="serviceInput" value="instagram" disabled>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="nameInput" class="form-label">Name</label>
+                                        <input type="text" class="form-control" id="nameInput" placeholder="Enter name" required>
+                                        <div class="invalid-feedback">Please enter the name.</div>
+                                    </div>
+                                </div>
+                        
+                                <div class="row mb-3">
+                                    <div class="col-md-12">
+                                        <label for="osSelect" class="form-label">Operating System</label>
+                                        <select id="osSelect" class="form-select" required>
+                                            <option value="android">Android</option>
+                                            <option value="browser">Browser</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="internalStateSelect" class="form-label">Internal State</label>
+                                        <select id="internalStateSelect" class="form-select" required>
+                                            <option value="active">Active</option>
+                                            <option value="in_active">In-Active</option>
+                                            <option value="expired">Expired</option>
+                                            <option value="complete">Complete</option>
+                                        </select>
+                                        <div class="invalid-feedback">Please select an internal state.</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="inputInput" class="form-label">Input</label>
+                                        <input type="text" class="form-control" id="inputInput" placeholder="Enter input" required>
+                                        <div class="invalid-feedback">Please enter the input.</div>
+                                    </div>
+                                </div>
+
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <input type="checkbox" class="form-check-input" id="localstoreCheckbox">
+                                        <label for="localstoreCheckbox" class="form-label">Localstore</label>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <input type="checkbox" class="form-check-input" id="threadingCheckbox">
+                                        <label for="threadingCheckbox" class="form-label">Threading</label>
+                                    </div>
+                                </div>
+                        
+                                <div class="row mb-3">
+                                    <div class="col-md-12">
+                                        <label for="childbotsSelect" class="form-label">Child Bots</label>
+                                        <div class="card" style="max-height: 200px; overflow-y: auto;">
+                                            <div class="card-body">
+                                                {% if profile_data %}
+                                                    {% for profile in profile_data %}
+                                                        <div class="form-check">
+                                                            <input class="form-check-input" type="checkbox" id="profile{{ forloop.counter }}" name="childbots" value="{{ profile.url }}">
+                                                            <label class="form-check-label" for="profile{{ forloop.counter }}">
+                                                                {{ profile.username }}
+                                                            </label>
+                                                        </div>
+                                                    {% endfor %}
+                                                {% else %}
+                                                    <p>No profiles available.</p>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                        
+                                <div class="text-end mt-3">
+                                    <button type="submit" class="btn btn-primary">Save</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scrape Task Upload Popup Modal -->
+<div class="modal fade" id="scrapeTaskPopup" tabindex="-1" aria-labelledby="scrapeTaskPopupLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="scrapeTaskPopupLabel">Upload Scrape Task Entries</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="scrapeTaskUploadForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="scrape-task-google-sheet-link" class="form-label d-flex align-items-center">
+                            <i class="ri-google-fill me-2" style="font-size: 1.5rem;"></i> Google Sheet Link
+                        </label>
+                        <input type="url" class="form-control" id="scrape-task-google-sheet-link" placeholder="Enter Google Sheet URL" required>
+                        <div class="invalid-feedback">Please enter a valid Google Sheet URL.</div>
+                    </div>
+                    <div class="mb-3">
+                        <p><strong>Mandatory Headers:</strong> [ "name", "service", "os", "internal_state", "input", "localstore", "threading", "childbots" ]</p>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="scrapeTaskUploadButton">Upload</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- End Scrape Task Upload Popup Modal -->
+
+<!-- Congrats Popup Modal -->
+<div class="modal fade" id="congratsPopup" tabindex="-1" aria-labelledby="congratsPopupLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <div class="mb-4">
+                    <lord-icon src="https://cdn.lordicon.com/lupuorrc.json" trigger="loop" colors="primary:#212529,secondary:#405189" style="width:120px;height:120px"></lord-icon>
+                </div>
+                <h5>Form information saved successfully!</h5>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <a href="{% url 'view_scrapetask_logs' %}" class="btn btn-primary">View Logs</a>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- End Congrats Popup Modal -->
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const scrapeTaskForm = document.getElementById('scrapeTaskForm');
+        const scrapeTaskPopup = new bootstrap.Modal(document.getElementById('scrapeTaskPopup'));
+        const congratsPopup = new bootstrap.Modal(document.getElementById('congratsPopup'));
+        const scrapeTaskEndpoint = "{{ api_url|escapejs }}";
+
+        scrapeTaskForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+
+            // Gather selected child bots
+            const selectedChildBots = [];
+            document.querySelectorAll('input[name="childbots"]:checked').forEach(checkbox => {
+                selectedChildBots.push(checkbox.value);
+            });
+
+            const data = {
+                service: "instagram",
+                name: document.getElementById('nameInput').value,
+                internal_state: document.getElementById('internalStateSelect').value,
+                input: document.getElementById('inputInput').value,
+                os: document.getElementById('osSelect').value,
+                localstore: document.getElementById('localstoreCheckbox').checked,
+                threading: document.getElementById('threadingCheckbox').checked,
+                childbots: selectedChildBots
+            };
+
+            console.log('Submitting scrape task form with data:', data);
+
+            fetch(scrapeTaskEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Basic ' + btoa('jeni:jeni@123')
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok.');
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Success:', data);
+                scrapeTaskForm.reset();
+                scrapeTaskPopup.hide();
+                congratsPopup.show();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error submitting the form!');
+            });
+        });
+    });
+</script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const scrapeTaskUploadButton = document.getElementById('scrapeTaskUploadButton');
+        const scrapeTaskPopup = new bootstrap.Modal(document.getElementById('scrapeTaskPopup'));
+        const congratsPopup = new bootstrap.Modal(document.getElementById('congratsPopup'));
+        const uploadEndpoint = "{{ upload_endpoint|escapejs }}";
+
+        scrapeTaskUploadButton.addEventListener('click', () => {
+            const sheetLink = document.getElementById('scrape-task-google-sheet-link').value;
+            const payload = {
+                "sheet_link": sheetLink,
+                "resource_type": "scrape_task",
+                "request_id": "xyz789"
+            };
+
+            console.log('Posting to URL:', uploadEndpoint);
+            console.log('Payload:', JSON.stringify(payload));
+
+            fetch(uploadEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Basic ' + btoa('jeni:jeni@123')
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        console.error('Response error:', text);
+                        throw new Error('Network response was not ok.');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Upload success:', data);
+                scrapeTaskPopup.hide();
+                congratsPopup.show();
+            })
+            .catch(error => {
+                console.error('Upload error:', error);
+                alert('Error uploading the data! Check the console for details.');
+            });
+        });
+    });
+</script>
+
+{% endblock %}

@@ -1,0 +1,205 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block extra_head %}
+<!-- Datatable CSS -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" />
+<!-- Datatable Responsive CSS -->
+<link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.2.9/css/responsive.bootstrap.min.css" />
+<!-- Datatable Buttons CSS -->
+<link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css">
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="page-content">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-xxl-6">
+                    <div class="card">
+                        <div class="card-header align-items-center d-flex">
+                            <h4 class="card-title mb-0 flex-grow-1">Device</h4>
+                            <!-- Upload Button and Modal -->
+                            <button type="button" class="btn btn-success mb-3" data-bs-toggle="modal" data-bs-target="#uploadPopup">
+                                <i class="ri-upload-line"></i>
+                            </button>
+                        </div><!-- end card header -->
+
+                        <div class="card-body">
+                            <form id="emailSettingsForm" class="needs-validation" novalidate onsubmit="submitForm(event)">
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="nameInput" class="form-label">Name</label>
+                                        <input type="text" class="form-control" id="nameInput" placeholder="Enter name" required>
+                                        <div class="invalid-feedback">Please enter a name.</div>
+                                    </div>
+                                </div>
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="serialNumberInput" class="form-label">Serial Number</label>
+                                        <input type="text" class="form-control" id="serialNumberInput" placeholder="Enter serial number" required>
+                                        <div class="invalid-feedback">Please enter a serial number.</div>
+                                    </div>
+                                </div>
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="infoTextField" class="form-label">Info</label>
+                                        <textarea class="form-control" id="infoTextField" rows="3" placeholder="Enter additional information"></textarea>
+                                        <div class="invalid-feedback">Please enter additional information.</div>
+                                    </div>
+                                </div>
+                                <div class="text-end mt-3">
+                                    <button type="submit" class="btn btn-primary" id="submitButton">Submit</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Upload Popup Modal -->
+                        <div class="modal fade" id="uploadPopup" tabindex="-1" aria-labelledby="uploadPopupLabel" aria-hidden="true">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="uploadPopupLabel">Upload Devices</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <form id="uploadSettingsForm" enctype="multipart/form-data">
+                                            <div class="mb-3">
+                                                <label for="device-google-sheet-link" class="form-label d-flex align-items-center">
+                                                    <i class="ri-google-fill me-2" style="font-size: 1.5rem;"></i> Google Sheet Link
+                                                </label>
+                                                <input type="url" class="form-control" id="device-google-sheet-link" placeholder="Enter Google Sheet URL" required>
+                                            </div>
+                                            <p><strong>Mandatory Headers:</strong> [ "username", "password", "info" ]</p>
+                                        </form>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                        <button type="button" class="btn btn-primary" id="uploadSettingsButton">Upload</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- End Upload Popup Modal -->
+
+                        <!-- Congratulations Popup Modal -->
+                        <div class="modal fade" id="congratsPopup" tabindex="-1" aria-labelledby="congratsPopupLabel" aria-hidden="true">
+                            <div class="modal-dialog modal-dialog-centered">
+                                <div class="modal-content">
+                                    <div class="modal-body text-center pt-4 pb-2">
+                                        <div class="mb-4">
+                                            <lord-icon src="https://cdn.lordicon.com/lupuorrc.json"
+                                                trigger="loop"
+                                                colors="primary:#212529,secondary:#405189"
+                                                style="width:120px;height:120px"></lord-icon>
+                                        </div>
+                                        <h5>Your Form Has Been Sent Successfully!</h5>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                        <a href="{% url 'view_device_logs' %}" class="btn btn-primary">View Log</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- End Congratulations Popup Modal -->
+
+                    </div>
+                </div> <!-- end col -->
+            </div>
+        </div> <!-- container-fluid -->
+    </div> <!-- page-content -->
+</div>
+<!-- end main content-->
+
+<script>
+    const deviceEndpoint = "{{ device_endpoint }}";
+    const uploadEndpoint = "{{ upload_endpoint }}";
+
+    function submitForm(event) {
+        event.preventDefault();
+        const name = document.getElementById('nameInput').value;
+        const serialNumber = document.getElementById('serialNumberInput').value;
+        const info = document.getElementById('infoTextField').value;
+        const data = {
+            name: name,
+            serial_number: serialNumber,
+            info: info
+        };
+
+        console.log('Submitting device form with data:', data);
+
+        fetch(deviceEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Basic ' + btoa('jeni:jeni@123')
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => {
+            console.log('Response status:', response.status);
+            return response.json();
+        })
+        .then(data => {
+            console.log('Device form submission success:', data);
+            document.getElementById('emailSettingsForm').reset();
+            var congratsPopup = new bootstrap.Modal(document.getElementById('congratsPopup'));
+            congratsPopup.show();
+        })
+        .catch((error) => {
+            console.error('Device form submission error:', error);
+            alert('Error submitting the form! Check the console for details.');
+        });
+    }
+
+    function handleUploadSettings() {
+        const spreadsheetUrl = document.getElementById('device-google-sheet-link').value;
+        const payload = {
+            "spreadsheet_url": spreadsheetUrl,
+            "resource_type": "devices",
+            "request_id": "abc123"
+        };
+
+        console.log('Uploading with payload:', payload);
+
+        fetch(uploadEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Basic ' + btoa('jeni:jeni@123')
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => {
+            console.log('Upload response status:', response.status);
+            return response.json();
+        })
+        .then(data => {
+            console.log('Upload success:', data);
+            var uploadPopup = bootstrap.Modal.getInstance(document.getElementById('uploadPopup'));
+            uploadPopup.hide();
+            var congratsPopup = new bootstrap.Modal(document.getElementById('congratsPopup'));
+            congratsPopup.show();
+        })
+        .catch((error) => {
+            console.error('Upload error:', error);
+            alert('Error uploading the data! Check the console for details.');
+        });
+    }
+
+    document.getElementById('uploadSettingsButton').addEventListener('click', handleUploadSettings);
+</script>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
+<!-- Datatable JS -->
+<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+<script src="https://cdn.datatables.net/responsive/2.2.9/js/dataTables.responsive.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.2.2/js/buttons.print.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.2.2/js/buttons.html5.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/vfs_fonts.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+{% endblock %}

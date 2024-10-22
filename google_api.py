@@ -188,7 +188,7 @@ class GoogleSheet(GoogleAPI):
             }
         try:     
             self.connection= gspread.service_account_from_dict(credentials)
-        except Exception('FailedtoCreateGoogleSheetConnection') as e:
+        except Exception as e:
            print(e)
            pass
         return self

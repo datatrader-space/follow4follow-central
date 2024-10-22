@@ -1,16 +1,28 @@
 from django.urls import path
 
-from .views import createResource
+from .views import createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource
 from django.urls import path, include
-from sessionbot.models import ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask,Todo
+from sessionbot.models import ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
 from rest_framework import routers, serializers, viewsets
 
 # Serializers define the API representation.
+class BulkCampaignSerializer(serializers.HyperlinkedModelSerializer):
+    class Meta:
+        model = BulkCampaign
+        exclude = ['customer',   'target_settings']
+
+class BulkCampaignViewSet(viewsets.ModelViewSet):
+    queryset = BulkCampaign.objects.all()
+    serializer_class = BulkCampaignSerializer
+
 class BotSerializer(serializers.HyperlinkedModelSerializer):
+    logged_in_on_servers = serializers.PrimaryKeyRelatedField(queryset=Server.objects.all())
+
+    
     class Meta:
         model = ChildBot
+        exclude = ['device', 'customer', 'email_provider']
         
-        exclude=['device','customer','email_provider']
 class BotViewSet(viewsets.ModelViewSet):
     queryset = ChildBot.objects.all()
     serializer_class = BotSerializer
@@ -23,14 +35,27 @@ class ServerSerializer(serializers.HyperlinkedModelSerializer):
 class ServerViewSet(viewsets.ModelViewSet):
     queryset = Server.objects.all()
     serializer_class = ServerSerializer
+
 class DeviceSerializer(serializers.HyperlinkedModelSerializer):
+    connected_to_server = serializers.PrimaryKeyRelatedField(queryset=Server.objects.all())
+
     class Meta:
-        model =Device
-        exclude=['connected_to_server']
+        model = Device
+        fields = '__all__' 
        
 class DeviceViewSet(viewsets.ModelViewSet):
     queryset = Device.objects.all()
     serializer_class = DeviceSerializer
+
+class TaskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Task
+        fields = '__all__'
+        
+class TaskViewSet(viewsets.ModelViewSet):
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
+    
 class MessagingSerializer(serializers.HyperlinkedModelSerializer):
     class Meta:
         model =CampaignTextContent
@@ -94,11 +119,15 @@ router.register(r'settings',SettingsViewSet)
 router.register(r'sharing',SharingViewSet)
 router.register(r'scrapetask',ScrapeTaskViewSet)
 router.register(r'todo',TodoViewSet)
+router.register(r'bulkcampaign', BulkCampaignViewSet)
+router.register(r'tasks', TaskViewSet)
+
 urlpatterns = [
     path("api/resource/create/", createResource, name="create_resource"),
     path("api/reports/logs", createResource, name="view_logs"),
     path('api/resource/', include(router.urls)),
-   
-    
-    
+    path('api/devices/create/', createDeviceResource, name='create_device'),
+    path("api/proxies/create/", createProxyResource, name='create_proxy'),
+    path("api/devices/delete/<str:serial_number>/", deleteDeviceResource, name='deleteDeviceResource'),
+    path('api/proxy/delete/<str:proxy_url>/', deleteProxyResource, name='delete_proxy_resource'),
 ]

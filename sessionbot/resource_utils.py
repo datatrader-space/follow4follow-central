@@ -1,259 +1,487 @@
+from django_celery_results.models import TaskResult
 from celery import shared_task
 from celery.utils.log import get_task_logger
-from django_celery_results.models import TaskResult
 from django.forms.models import model_to_dict
+import requests
+
 def read_googlesheet_data(**kwargs):
+    print("Entering read_googlesheet_data with kwargs:", kwargs)
     pass
+
+
 @shared_task()
-def create_resources_from_google_sheets(**kwargs):   
+def create_resources_from_google_sheets(**kwargs):
+    print("Entering create_resources_from_google_sheets with kwargs:", kwargs)
     from google_api import GoogleSheet
-    g=GoogleSheet()
-    g.initialize_connection()   
-    resource_types=['email_providers','profiles','servers','devices']     
-    if kwargs.get('spreadsheet_url'):
-        g.spreadsheet_url=kwargs.get('spreadsheet_url')   
-        print(kwargs['spreadsheet_url'])      
-    if kwargs.get('resource_type'):
-        resource_types=[kwargs.get('resource_type')]
-    request_id=kwargs.get('request_id')  
-    response=[]
+
+    g = GoogleSheet()
+    g.initialize_connection()
+    print("i was initialized")
+    resource_types = ["email_providers", "profiles", "servers", "devices"]
+    print(kwargs)
+    if kwargs.get("spreadsheet_url"):
+        g.spreadsheet_url = kwargs.get("spreadsheet_url")
+        print("Spreadsheet URL:", kwargs["spreadsheet_url"])
+
+    if kwargs.get("resource_type"):
+        resource_types = [kwargs.get("resource_type")]
+
+    request_id = kwargs.get("request_id")
+    response = []
+
     for resource_type in resource_types:
-        g.open_google_sheet().find_worksheet(resource_type).read_worksheet()  
-        data=g.worksheet_data    
-        #print(data) 
-        
+        print(f"Processing resource type: {resource_type}")
+        g.open_google_sheet().find_worksheet(resource_type).read_worksheet()
+        data = g.worksheet_data
+        print(f"Data read from worksheet: {data}")
+
         for row in data:
-            #print(row)
-            kwargs.update({'row':row})
-            resp=None
-            if resource_type=='profiles':
-                if not row.get('service'):
-                    print('Service Not Found.Skipping Profile.Add report here')
+            print(f"Processing row: {row}")
+            kwargs.update({"row": row})
+            resp = None
+            if resource_type == "profiles":
+                if not row.get("service"):
+                    print("Service Not Found. Skipping Profile. Add report here.")
                     continue
-                
-                resp=profile(**row)
-                resp.update({'resource_type':'profile'})
-                resp.update({'request_id':request_id})
-            elif resource_type=='email_providers':
-                resp=email_provider(**row)
-                resp.update({'resource_type':'email_provider'})
-                resp.update({'request_id':request_id})
-                print(resp)
-            elif resource_type=='devices':
-                resp=device(**row)
-                resp.update({'request_id':request_id})
-                print(resp)
-            elif resource_type=='servers':
-                resp=server(**row)
-                resp.update({'resource_type':'server'})
-                resp.update({'request_id':request_id})
-            elif resource_type=='proxies':
-                kwargs.update({'resource_type':resource_type})
-                kwargs.update({'data_point':'proxy'})
-                resp.update({'request_id':request_id})
+
+                resp = profile(**row)
+                resp.update({"resource_type": "profile"})
+                resp.update({"request_id": request_id})
+            elif resource_type == "email_providers":
+                resp = email_provider(**row)
+                resp.update({"resource_type": "email_provider"})
+                resp.update({"request_id": request_id})
+                print("Email provider response:", resp)
+            elif resource_type == "devices":
+                resp = device(**row)
+                resp.update({"request_id": request_id})
+                print("Device response:", resp)
+            elif resource_type == "servers":
+                resp = server(**row)
+                resp.update({"resource_type": "server"})
+                resp.update({"request_id": request_id})
+            elif resource_type == "proxies":
+                kwargs.update({"resource_type": resource_type})
+                kwargs.update({"data_point": "proxy"})
+                resp.update({"request_id": request_id})
+
             if resp:
                 response.append(resp)
-        return response
+
+        print("Final response for resource type {}: {}".format(resource_type, response))
+
+    return response
+
 
 def profile(**kwargs):
-    #Takes a single row and returns a success response with object, or error respons with message
-    from sessionbot.models import ChildBot
-    from sessionbot.models import EmailProvider
-    username=kwargs.get('username')
+    logs = []
+
+    def log_message(message):
+        logs.append(message)
+
+    log_message(f"Entering profile with kwargs: {kwargs}")
+    from sessionbot.models import (
+        ChildBot,
+        EmailProvider,
+        Server,
+    )  # Ensure you have a Server model
+
+    username = kwargs.get("username")
     if not username:
-        return {'response':'failed','message':'ProfileCreationFailed Username Missing','object':None,'label':'UserNameNotFound'}
-    service=kwargs.get('service')
+        log_message("Username is missing.")
+        return {
+            "response": "failed",
+            "message": "ProfileCreationFailed Username Missing",
+            "object": None,
+            "label": "UserNameNotFound",
+            "logs": logs,
+        }
+
+    service = kwargs.get("service")
     if not service:
-        return {'response':'failed','message':'ProfileCreationFailed for '+username+' Service Missing','object':None,'label':'ServiceNotFound'}
-    password=kwargs.get('password')
+        log_message(f"Service is missing for {username}.")
+        return {
+            "response": "failed",
+            "message": f"ProfileCreationFailed for {username} Service Missing",
+            "object": None,
+            "label": "ServiceNotFound",
+            "logs": logs,
+        }
+
+    password = kwargs.get("password")
     if not password:
-        return {'response':'failed','message':'ProfileCreationFailed for '+username+' Password Missing','object':None,'label':'PasswordNotFound'}
-    email_address=kwargs.get('email_address')
+        log_message(f"Password is missing for {username}.")
+        return {
+            "response": "failed",
+            "message": f"ProfileCreationFailed for {username} Password Missing",
+            "object": None,
+            "label": "PasswordNotFound",
+            "logs": logs,
+        }
+
+    email_address = kwargs.get("email_address")
     if not email_address:
-        return {'response':'failed','message':'ProfileCreationFailed for '+username+' Email Address Missing','object':None,'label':'EmailNotFound'}
-    c=ChildBot.objects.all().filter(service=service).filter(username=username)
+        log_message(f"Email address is missing for {username}.")
+        return {
+            "response": "failed",
+            "message": f"ProfileCreationFailed for {username} Email Address Missing",
+            "object": None,
+            "label": "EmailNotFound",
+            "logs": logs,
+        }
+
+    logged_in_on_servers = kwargs.get("logged_in_on_servers")
+    log_message(f"This is a received Logged Value: {logged_in_on_servers}")
+
+    # Fetch the server using logged_in_on_servers_id
+    server = Server.objects.filter(id=int(logged_in_on_servers)).first()
+    if not server or not server.public_ip:
+        log_message("Server details are missing or public IP is not found.")
+        return {
+            "response": "failed",
+            "message": "ProfileCreationFailed Server Details Missing",
+            "object": None,
+            "label": "ServerNotFound",
+            "logs": logs,
+        }
+
+    worker_url = f"{server.public_ip}crawl/childbots/"
+
+    print('This is Worker URL', worker_url)
+
+    # Check if the profile exists
+    c = ChildBot.objects.filter(service=service, username=username).first()
     if c:
-        c=c[0]
-        c.password=password
-        c.email_address=email_address
-        c.display_name=username
-        _c=model_to_dict(c)
-        _c.pop('cookie')
-        _c.pop('created_on')
-        resp= {'response':'success','message':'Profile Already Exists for '+username+' Duplicate','object':_c,'label':'ProfileAlreadyExists'}
+        c.password = password
+        c.email_address = email_address
+        c.display_name = username
+        c.logged_in_on_servers_id = int(logged_in_on_servers)
+        c.save()
+        _c = model_to_dict(c)
+        _c.pop("cookie")
+        _c.pop("created_on")
+        resp = {
+            "response": "success",
+            "message": f"Profile Already Exists for {username} Duplicate",
+            "object": _c,
+            "label": "ProfileAlreadyExists",
+        }
+        log_message(f"Profile already exists for {username}.")
     else:
-        c=ChildBot(
-                username=username,
-                display_name=username,
-                password=password,
-                service=service,
-                email_address=email_address
-                    )
-        _c=model_to_dict(c)
-        _c.pop('cookie')
-        _c.pop('created_on')
-    email_provider=kwargs.get('email_provider')
-    email_password=kwargs.get('email_password')
-    if not email_password:
-        if email_provider:
-            e=EmailProvider()
-            e=EmailProvider.objects.all().filter(imap_email_host=email_provider)
-            if e:
-                c.email_provider=e[0]
+        log_message(f"Creating a new profile for {username}.")
+
+        c = ChildBot(
+            username=username,
+            display_name=username,
+            password=password,
+            service=service,
+            email_address=email_address,
+            logged_in_on_servers_id=int(logged_in_on_servers),
+        )
+        c.save()
+        _c = model_to_dict(c)
+        _c.pop("cookie")
+        _c.pop("created_on")
+
+        email_provider = kwargs.get("email_provider")
+        email_password = kwargs.get("email_password")
+
+        if not email_password:
+            if email_provider:
+                e = EmailProvider.objects.filter(imap_email_host=email_provider).first()
+                if e:
+                    c.email_provider = e
+                    log_message(f"Email provider found and assigned for {username}.")
+                else:
+                    resp = {
+                        "response": "success",
+                        "message": f"Profile {username} Created without Email Provider",
+                        "object": _c,
+                        "label": "EmailProviderNotExists",
+                    }
+                    log_message(f"Email provider not found for {username}.")
             else:
-                resp={'response':'success','message':'Profile '+username+' Created without Email Provider','object':_c,'label':'EmailProviderNotExists'}
+                resp = {
+                    "response": "success",
+                    "message": f"Profile {username} Created without Email Provider/Password",
+                    "object": _c,
+                    "label": "IncompleteEmailSettings",
+                }
+                log_message(f"Email provider and password missing for {username}.")
         else:
-            resp= {'response':'success','message':'Profile '+username+' Created without Email Provider/Password','object':_c,'label':'IncompelteEmailSettings'}
-    else:
-        c.email_password=email_password
-    c.save()
-   
+            c.email_password = email_password
+            log_message(f"Email password set for {username}.")
+
+        c.save()
+        resp = {
+            "response": "success",
+            "message": f"Profile {username} Created Successfully",
+            "object": _c,
+            "label": "NewProfileCreated",
+        }
+        log_message(f"New profile created for {username}.")
+
+    # Send the payload to the worker URL
+    try:
+        worker_payload = {
+            "username": username,
+            "service": service,
+            "password": password,
+            "email_address": email_address,
+        }
+        print(worker_payload)
+        response = requests.post(worker_url, json=worker_payload)
+        response.raise_for_status()  # Raise exception if the request failed
+        log_message(f"Successfully sent payload to worker: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        log_message(f"Error sending payload to worker: {str(e)}")
+
+    resp["logs"] = logs
     return resp
+
 
 def email_provider(**kwargs):
+    print("Entering email_provider with kwargs:", kwargs)
     from sessionbot.models import EmailProvider
-    print(kwargs)
-    imap_email_host=kwargs.get('imap_host')
+
+    imap_email_host = kwargs.get("imap_host")
     if not imap_email_host:
-        return {'response':'failed','message':'EmailProviderCreationFailed ImapEmailHost Missing','object':None,'label':'ImapEmailHostMissing'}
-    
-    imap_email_username=kwargs.get('imap_username')
+        return {
+            "response": "failed",
+            "message": "EmailProviderCreationFailed ImapEmailHost Missing",
+            "object": None,
+            "label": "ImapEmailHostMissing",
+        }
+
+    imap_email_username = kwargs.get("imap_username")
     if not imap_email_username:
-        return {'response':'failed','message':'EmailProviderCreationFailed ImapEmailUsernName Missing','object':None,'label':'ImapEmailUsernameMissing'}
+        return {
+            "response": "failed",
+            "message": "EmailProviderCreationFailed ImapEmailUsernName Missing",
+            "object": None,
+            "label": "ImapEmailUsernameMissing",
+        }
 
-    imap_email_password=kwargs.get('imap_password')
+    imap_email_password = kwargs.get("imap_password")
     if not imap_email_password:
-        return {'response':'failed','message':'EmailProviderCreationFailed ImapEmailPassword Missing','object':None,'label':'ImapEmailPasswordMissing'}
-    
-    imap_email_port=kwargs.get('imap_port')
-    if not imap_email_port:
-        imap_email_port=0
-    name=kwargs.get('name')
-    if not name:
-        name=imap_email_host
-    e=EmailProvider.objects.all().filter(imap_email_username=imap_email_username)
-    if e:
-        return {'response':'success','message':'Email Provider Already Exists for '+imap_email_username+' Duplicate','object':e,'label':'EmailProviderAlreadyExists'}
+        return {
+            "response": "failed",
+            "message": "EmailProviderCreationFailed ImapEmailPassword Missing",
+            "object": None,
+            "label": "ImapEmailPasswordMissing",
+        }
 
+    imap_email_port = kwargs.get("imap_port", 0)
+    name = kwargs.get("name", imap_email_host)
+    e = EmailProvider.objects.all().filter(imap_email_username=imap_email_username)
+    if e:
+        return {
+            "response": "success",
+            "message": f"Email Provider Already Exists for {imap_email_username} Duplicate",
+            "object": e,
+            "label": "EmailProviderAlreadyExists",
+        }
     else:
         from customer.models import Customer
-        c=Customer.objects.all().filter(user__id=1)
-        c=c[0]
-        e=EmailProvider(
-                    imap_email_username=imap_email_username,
-                    imap_email_host=imap_email_host,
-                    imap_email_password=imap_email_password,
-                    imap_email_port=imap_email_port,
-                    name=name,
-                    customer=c
-                        )
+
+        c = Customer.objects.all().filter(user__id=1).first()
+        e = EmailProvider(
+            imap_email_username=imap_email_username,
+            imap_email_host=imap_email_host,
+            imap_email_password=imap_email_password,
+            imap_email_port=imap_email_port,
+            name=name,
+            customer=c,
+        )
         e.save()
-        return {'response':'success','message':'Email Provider '+imap_email_host+'Created Successfully','object':e,'label':'NewEmailProviderCreated'}
+        return {
+            "response": "success",
+            "message": f"Email Provider {imap_email_host} Created Successfully",
+            "object": e,
+            "label": "NewEmailProviderCreated",
+        }
+
 
 def server(**kwargs):
-    from sessionbot.models import Server
-    server_id=kwargs.get('server_id')
-    name=kwargs.get('name')
-    max_tasks_allowed=kwargs.get('max_tasks_allowed')
-    
-    if not id or len(server_id)<1:
-        return {'status':'failed','message':'Mandatory Key "Id" missing for row','object':None,'label':'IdMissing'}
-    s=Server.objects.all().filter(instance_id=server_id)
-    if s:
-        s=s[0]
-    
-        s.name=name
-        s.maximum_parallel_tasks_allowed=kwargs.get('max_tasks_allowed')
-        s.save()
-        resp={'status':'success','message':'Update Server '+name+'','object':model_to_dict(s),'label':'ServerUpdated'}
-    else:
-        s=Server(
-                    instance_id=server_id,
-                    name=name,
-                    maximum_parallel_tasks_allowed=max_tasks_allowed
+    logs = []
 
-                )
+    def log_message(message):
+        logs.append(message)
+
+    log_message(f"Entering server with kwargs: {kwargs}")
+    from sessionbot.models import Server
+
+    server_id = kwargs.get("server_id")
+    name = kwargs.get("name")
+    max_tasks_allowed = kwargs.get("max_tasks_allowed")
+
+    if not server_id or len(server_id) < 1:
+        log_message('Mandatory Key "Id" missing for row')
+        return {
+            "status": "failed",
+            "message": 'Mandatory Key "Id" missing for row',
+            "object": None,
+            "label": "IdMissing",
+            "logs": logs,
+        }
+
+    s = Server.objects.all().filter(instance_id=server_id)
+    if s:
+        s = s[0]
+        s.name = name
+        s.maximum_parallel_tasks_allowed = max_tasks_allowed
         s.save()
-        resp={'status':'success','message':'Created Server '+name+'','object':model_to_dict(s),'label':'ServerCreated'}
+        resp = {
+            "status": "success",
+            "message": f"Update Server {name}",
+            "object": model_to_dict(s),
+            "label": "ServerUpdated",
+        }
+        log_message(f"Updated server with ID: {server_id} and Name: {name}")
+    else:
+        s = Server(
+            instance_id=server_id,
+            name=name,
+            maximum_parallel_tasks_allowed=max_tasks_allowed,
+        )
+        s.save()
+        resp = {
+            "status": "success",
+            "message": f"Created Server {name}",
+            "object": model_to_dict(s),
+            "label": "ServerCreated",
+        }
+        log_message(f"Created new server with ID: {server_id} and Name: {name}")
+
+    resp["logs"] = logs
+    return resp
+
+
+def device(**kwargs):
+    logs = []
+
+    def log_message(message):
+        logs.append(message)
+
+    log_message(f"Entering device with kwargs: {kwargs}")
+
+    from sessionbot.models import Device, Server
+
+    name = kwargs.get("name")
+    serial_number = kwargs.get("serial_number")
+    connected_to_server = kwargs.get("connected_to_server")
+
+    if not serial_number:
+        log_message("Serial Number Missing.")
+        return {
+            "response": "failed",
+            "message": "Device Creation Failed! Serial Number Missing",
+            "object": None,
+            "label": "SerialNumberMissing",
+            "logs": logs,
+        }
+    if not connected_to_server:
+        log_message("Connected to Server Missing.")
+        return {
+            "response": "failed",
+            "message": "Device Creation Failed! Connected to Server Missing",
+            "object": None,
+            "label": "ConnectedToServerMissing",
+            "logs": logs,
+        }
+    if not name:
+        log_message("Name Missing.")
+        return {
+            "response": "failed",
+            "message": "Device Creation Failed! Name Missing",
+            "object": None,
+            "label": "NameMissing",
+            "logs": logs,
+        }
+
+    d = Device.objects.all().filter(serial_number=serial_number)
+    c = Server.objects.all().filter(instance_id=connected_to_server).first()
+
+    if not c:
+        log_message("Server Not Found.")
+        return {
+            "response": "failed",
+            "message": "Device Creation Failed! Server Not Found",
+            "object": None,
+            "label": "ConnectedServerNotFound",
+            "logs": logs,
+        }
+
+    if d:
+        d = d[0]
+        d.connected_to_server = c
+        d.name = name
+        d.save()
+        log_message(f"Device {serial_number} updated successfully.")
+        resp = {
+            "response": "success",
+            "message": f"Device {serial_number} Updated Successfully",
+            "object": model_to_dict(d),
+            "label": "DeviceUpdated",
+            "logs": logs,
+        }
+    else:
+        d = Device(name=name, serial_number=serial_number, connected_to_server=c)
+        d.save()
+        log_message(f"Device {serial_number} created successfully.")
+        resp = {
+            "response": "success",
+            "message": f"Device {serial_number} Created Successfully",
+            "object": model_to_dict(d),
+            "label": "DeviceCreated",
+            "logs": logs,
+        }
 
     return resp
 
-def device(**kwargs):
-    from sessionbot.models import Device
-    from sessionbot.models import Server
-    name=kwargs.get('name')
-    serial_number=kwargs.get('serial_number')
-    connected_to_server=kwargs.get('connected_to_server')
-    if not serial_number:
-        return {'response':'failed','message':'Device Creation Failed! Serial Number Missing','object':None,'label':'SerialNumberMissing'}
-    else:
-        if not connected_to_server:
-            return {'response':'failed','message':'Device Creation Failed! Connected to Server Missing','object':None,'label':'ConnectedToServerMissing'}
-
-        else:
-            if not name:
-                return {'response':'failed','message':'Device Creation Failed! Name Missing','object':None,'label':'NameMissing'}
-
-            else:
-                from sessionbot.models import Device
-                from sessionbot.models import Server
-                d=Device.objects.all().filter(serial_number=serial_number)
-                c=Server.objects.all().filter(instance_id=connected_to_server)
-                if c:
-                    c=c[0]
-                else:
-                    return {'response':'failed','message':'Device Creation Failed! Server Not Found','object':None,'label':'ConnectedServerNotFound'}
-
-                if d:
-                    d=d[0]
-                    d.connected_to_server=c
-                    d.name=name
-                    d.save()
-                    resp= {'response':'success','message':'Device '+serial_number+' Updated Successfully ','object':model_to_dict(d),'label':'DeviceUpdated'}
-
-                else:
-                    d=Device(
-                            name=name,
-                            serial_number=serial_number,
-                            connected_to_server=c
-
-                            )
-                    d.save()
-                    resp= {'response':'success','message':'Device '+serial_number+' Created Successfully ','object':model_to_dict(d),'label':'DeviceUpdated'}
-                return resp
 
 @shared_task()
 def convert_bulk_campaign_to_workflow_for_vivide_mind_worker(**kwargs):
-    max_bot_reservation_by_service_campaigns=3
+    print(
+        "Entering convert_bulk_campaign_to_workflow_for_vivide_mind_worker with kwargs:",
+        kwargs,
+    )
+    max_bot_reservation_by_service_campaigns = 3
     from sessionbot.models import BulkCampaign
-    b=BulkCampaign.objects.all().filter(id=1)
-    b=b[0]
-    bot_campaigns=[]
+
+    b = BulkCampaign.objects.all().filter(id=1).first()
+    if not b:
+        print("BulkCampaign with id=1 not found")
+        return
+
+    bot_campaigns = []
     for bot in b.childbots.all():
-        current_reservation_by_campaigns=bot.campaign.all()
-        campaigns=current_reservation_by_campaigns.filter(service=b.service)
-        for campaign in campaigns:
-            bot_campaigns.append(campaign)
-        if current_reservation_by_campaigns>max_bot_reservation_by_service_campaigns:
-            print('bot assignment failed. Max Number of Allowed Campaigns in General Settings exceed. Removing the Bot from Campaign (Implement)')
+        current_reservation_by_campaigns = bot.campaign.all()
+        campaigns = current_reservation_by_campaigns.filter(service=b.service)
+        bot_campaigns.extend(campaigns)
+        if (
+            len(current_reservation_by_campaigns)
+            > max_bot_reservation_by_service_campaigns
+        ):
+            print(
+                "Bot assignment failed. Max Number of Allowed Campaigns in General Settings exceeded. Removing the Bot from Campaign (Implement)"
+            )
             b.childbots.remove(bot)
-    campaigns=list(set(campaigns))
+
+    campaigns = list(set(bot_campaigns))
     b.save()
-    bot_campaigns_servers=[]
-    for campaign in campaigns:
-        bot_campaigns_servers.append(campaign.server)
-    bot_campaigns_servers=list(set(bot_campaigns_servers))
+
+    bot_campaigns_servers = list(set(campaign.server for campaign in campaigns))
+    print("Bot campaign servers:", bot_campaigns_servers)
+
     if bot_campaigns_servers:
-        if len(bot_campaigns_servers)==1:
-            prob=False
+        if len(bot_campaigns_servers) == 1:
+            prob = False
             for device in b.devies.all():
-                if device.connected_to_server==bot_campaigns_servers[0]:
-                    pass
-                else:
-                    prob=True
+                if device.connected_to_server != bot_campaigns_servers[0]:
+                    prob = True
+                    break
             if not prob:
-                b.server=bot_campaigns_servers[0]
+                b.server = bot_campaigns_servers[0]
                 b.save()
-    
-
-
+                print(f"Assigned server {b.server} to BulkCampaign")

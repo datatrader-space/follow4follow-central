@@ -20,6 +20,7 @@ from django.contrib.postgres.fields import ArrayField
 from jsonfield.fields import JSONField
 from django import forms
 
+
 User = get_user_model()
 from typing import Tuple, Dict
 
@@ -249,6 +250,9 @@ class Server(models.Model):
 
     def __str__(self):
         return self.name
+    
+    def get_server_url(self):
+        return self.public_ip
 
     def update_instance_information(self): pass
 
@@ -259,6 +263,7 @@ class Server(models.Model):
     def stop_instance(self): pass
 
     def terminate_instance(self): pass
+
 class Device(models.Model):
     name=models.CharField(max_length=500,blank=False,unique=True,null=False)
     serial_number=models.CharField(max_length=500,blank=False,unique=True,null=False)
@@ -268,6 +273,7 @@ class Device(models.Model):
 
     def __str__(self):
         return self.serial_number
+
 class ChildBot(models.Model):
     """[summary]
 
@@ -340,7 +346,7 @@ class ChildBot(models.Model):
         blank=True,
         null=True,
     )
-
+    logged_in_on_servers=models.ForeignKey(Server,on_delete=models.SET_NULL,null=True)
     imap_email_host = models.CharField(max_length=100,
                                        blank=True,
                                        null=True
@@ -382,7 +388,7 @@ class ChildBot(models.Model):
     created_on = models.DateField(default=timezone.now)
 
     # TODO create a default storage class to use for cookies
-    cookie = models.FileField(upload_to='login/cookies', blank=True)
+    cookie = models.FileField(upload_to='login/cookies', blank=True, null=True)
 
     
     email_provider = models.ForeignKey(EmailProvider,
@@ -544,6 +550,8 @@ class Proxy(models.Model):
         default='http'
     )
 
+    connected_to_server=models.ForeignKey(Server,on_delete=models.SET_NULL,null=True)
+
     class Meta:
         unique_together = ('customer', 'proxy_url')
         verbose_name_plural = "proxies"
@@ -645,6 +653,7 @@ class Proxy(models.Model):
 
     def __str__(self):
         return f'{self.proxy_url}'  
+
 class CampaignTextContent(models.Model):
     name=models.CharField(blank=True,null=True,max_length=5000)
     comment_list = models.TextField(blank=True, null=True)
@@ -679,12 +688,12 @@ class Settings(models.Model):
     max_interactions_per_runtask=models.IntegerField(default=5,null=False,blank=False)
     delay_between_runtasks=models.IntegerField(default=1,null=False,blank=False)
     created_on = models.DateTimeField(default=timezone.now, null=True)
-    behavior=models.JSONField(default={
-        'with_new_followers':'welocome_message,like_3,comment_3,share_post',
-        'with_target':'follow',
-        'with_liker':'like',
-        'with_commenter':'like_comment',
-        'follow_per_session':10,
+    behavior = models.JSONField(default={
+    'with_new_followers': 'welcome_message,like_3,comment_3,share_post',
+    'with_target': 'follow',
+    'with_liker': 'like',
+    'with_commenter': 'like_comment',
+    'follow_per_session': 10,
     })
     max_scrape_bots=models.IntegerField(default=2)
 
@@ -723,6 +732,550 @@ class DemoGraphic(models.Model):
 
     def __str__(self):
         return self.name
+ITEMS_SCHEMA ={
+    'type': 'array',
+    'title': 'Player Configuration',
+    'items': {
+        'type': 'object',
+        "properties": {
+    "Page": {
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "HomePage",
+          "properties": {
+            "max_swipes": {
+              "type": "number",
+              
+            },
+
+            "delay_between_each_swipe":{
+              "type": "integer",
+              "value":100,
+              "help_text":'Enter value in seconds'
+
+            },
+
+            "like_posts_randomly":{
+              "type": "boolean",
+              "value":100,
+              
+
+            },
+            "comment_on_posts_randomly":{
+              "type": "boolean",
+              "value":100,
+              
+
+            },
+            "open_comments_and_scroll":{
+              "type": "boolean",
+              "value":100,
+              
+
+            },
+            "max_comments_to_read":{
+              "type": "integer",
+              "value":100,
+              
+
+            },
+            "bookmark_posts":{
+                "type":"boolean",
+
+
+            },
+
+            "share_posts":{
+                "type":"boolean"
+
+            },
+            "like_posts_of": {
+              "type": "string",
+              "value":100,
+            },
+            "repeat_after": {
+              "type": "string",
+              "value":100,
+              "help_text":'Enter value in hours. leave empty for one time task'
+            },
+          "data_point": {
+              "type": "string",
+             
+                'default': 'explore_home_page', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+        {
+          "type": "object",
+          "title": "Explore Page",
+          "properties": {
+             "max_swipes": {
+              "type": "number",
+              
+            },
+            "max_open_posts": {
+              "type": "number",
+              "value":100,
+              "help_text":"Max Number of Post clicks after opening Explore Page"
+            },
+
+             "max_swipes_in_open_posts": {
+              "type": "number",
+              "value":10,
+              "help_text":"Max number of swipes after opening Post"
+            },
+             "max_swipes": {
+              "type": "number",
+              "value":10,
+              "help_text":"Max number of swipes in Explore Page"
+            },
+            "max_likes": {
+              "type": "number",
+              "value":10,
+            },
+             "max_follows": {
+              "type": "number",
+              "value":10,
+            },
+             "repeat_after": {
+              "type": "string",
+              "value":100,
+              "help_text":'Enter value in hours. leave empty for one time task'
+            },
+          "data_point": {
+              "type": "string",
+             
+                'default': 'explore_explore_page', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+        {
+          "type": "object",
+          "title": "Story Page",
+          "properties": {
+            "max_swipes": {
+              "type": "number",
+              
+            },
+            "max_likes": {
+              "type": "number",
+              "value":100,
+            },
+            "like_stories_of": {
+              "type": "string",
+              "value":100,
+              "help_text":"Enter Username separated by comma"
+            },
+          "data_point": {
+              "type": "string",
+             
+                'default': 'watch_story', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+         {
+          "type": "object",
+          "title": "Reels Page",
+          "properties": {
+            "max_swipes": {
+              "type": "number",
+              
+            },
+
+            "delay_between_each_swipe":{
+              "type": "integer",
+              "value":100,
+              "help_text":'Enter value in seconds'
+
+            },
+
+            "like_posts_randomly":{
+              "type": "boolean",
+              "value":100,
+              
+
+            },
+            "comment_on_posts_randomly":{
+              "type": "boolean",
+              "value":100,
+              
+
+            },
+            "open_comments_and_scroll":{
+              "type": "boolean",
+              "value":100,
+              
+
+            },
+            "max_comments_to_read":{
+              "type": "integer",
+              "value":100,
+              
+
+            },
+            "bookmark_posts":{
+                "type":"boolean",
+
+
+            },
+
+            "share_posts":{
+                "type":"boolean"
+
+            },
+            "like_posts_of": {
+              "type": "string",
+              "value":100,
+            },
+            "repeat_after": {
+              "type": "string",
+              "value":100,
+              "help_text":'Enter value in hours. leave empty for one time task'
+            },
+             "check_audio": {
+              "type": "string",
+              "value":100,
+              "help_text":'Enter value in hours. leave empty for one time task'
+            },
+           "data_point": {
+              "type": "string",
+             
+                'default': 'watch_reels', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+        {
+          "type": "object",
+          "title": "Messenger Page",
+          "properties": {
+           
+
+            "open_messenger_on_new_messages_only":{
+              "type": "boolean",
+              #"value":100,
+
+
+            },
+
+            "reply_to_messages":{
+              "type": "boolean",
+              #"value":100,
+              
+
+            },
+           
+            "check_requests":{
+              "type": "boolean",
+              #"value":100,
+              
+
+            },
+            
+            "repeat_after": {
+              "type": "string",
+              "value":100,
+              "help_text":'Enter value in hours. leave empty for one time task'
+            },
+            
+           "data_point": {
+              "type": "string",
+             
+                'default': 'check_messenger', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+        {
+          "type": "object",
+          "title": "Search User and Interact",
+          "properties": {
+            "max_interactions_per_day": {
+              "type": "number",
+              
+            },
+            "open_posts_of_targets_and_like": {
+              "type": "boolean",
+            
+            },
+
+            "share_latest_post_of_target": {
+              "type": "boolean",
+              "help_text":"Share Latest Post of Target as story"
+             
+              
+            },
+            "send_reachout_message": {
+              "type": "boolean",
+              "help_text":"Send Reachout Message to Target",
+              
+             
+              
+            },
+
+            "open_highlights_of_target": {
+              "type": "boolean",
+              "help_text":"Send Reachout Message to Target",            
+            },
+            'follow_target':
+            {
+                "type": "boolean",
+              "help_text":"Check to Follow Each Target",
+
+            },
+         "data_point": {
+              "type": "string",
+             
+                'default': 'search_user_and_interact', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+        {
+          "type": "object",
+          "title": "Cold Outreach ",
+          "properties": {
+            "max_dms_per_day_per_bot": {
+              "type": "number",
+              
+            },
+            "open_profile_and_send_dm": {
+              "type": "boolean",
+            
+            },
+            "open_posts_of_targets_and_like": {
+              "type": "boolean",
+            
+            },
+            "max_follow_ups": {
+              "type": "number",
+            
+            },
+            "gap_between_each_follow_up": {
+              "type": "number",
+              "help_text":"Enter the gap between each followup in hours"
+            
+            },
+            "should_reply": {
+              "type": "boolean",
+            
+            },
+            "obtain_targets_from_file":
+            {
+                "type":"string",
+                "help_text":"Enter the link to Google Spreadsheet containing targets.It should only contain 1 column. Share the file to 'testo-1@eng-electron-326810.iam.gserviceaccount.com'"
+
+            },
+
+           
+        
+
+           "data_point": {
+              "type": "string",
+             
+                'default': 'send_dm', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+        
+         {
+          "type": "object",
+          "title": "Bulk Task (SMM) ",
+          "properties": {
+            "activity_to_perform": {
+              "type": "string",
+              "help_text":"follow,dm,like"
+              
+            },
+            "target_profile": {
+              "type": "string",
+              "help_text":"username of the recipient"
+            
+            },
+            "target_post": {
+              "type": "string",
+              "help_text":"link of the post"
+            
+            },
+            "os": {
+              "type": "string",
+              "help_text":"android,browser"
+            
+            },
+            "quantity": {
+              "type": "number",
+            
+            },
+           
+           
+
+           
+        
+
+           "data_point": {
+              "type": "string",
+             
+                'default': 'bulk_task', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+         
+        {
+          "type": "object",
+          "title": "Unfollow",
+          "properties": {
+            "unfollow_after": {
+              "type": "number",
+              "help_text":"Enter the max number of followings after which to start unfollowing"
+              
+            },
+            "max_unfollows_per_run": {
+              "type": "number",
+              "value":100,
+              "help_text":"The standard number of following count after which to stop unfollowing"
+             
+            },
+            "repeat_after": {
+              "type": "number",
+              "value":100,
+              "help_text":"Enter the duration in hours after which to repeat the task every day."
+             
+            },
+          "name": {
+              "type": "string",
+             
+                'default': 'unfollow', # default value for new items
+                'readonly': True,
+            },
+             "data_point": {
+              "type": "string",
+             
+                'default': 'unfollow_users', # default value for new items
+                'readonly': True,
+            },
+            "end_point": {
+              "type": "string",
+             
+                'default': 'interact', # default value for new items
+                'readonly': True,
+            },
+          }
+        },
+      ]
+    },
+
+  }
+    }
+}
+
+MONITOR_SCHEMA=   {
+    'type': 'array',
+    'items':{
+    'oneOf': [
+        {
+            "type": "object",
+          "title": "User Profile",
+            'properties': {
+               "type": {
+              "type": "string",
+             
+                'default': 'user', # default value for new items
+                'readonly': True,
+              
+            },
+                "usernames":{"type":"string"},
+                'onEvent': {'type': 'array','items': {
+                'oneOf':[{"type":"object","title":"On New Post","properties":{"share_as_story":{"type":"boolean"},
+                          "like":{"type":"boolean"},"monitor_after":{"type":"integer","help_text":"Enter value in hours"},
+                          "event":{ "type": "string",
+             
+                                  'default': 'on_new_post', # default value for new items
+                                  'readonly': True,}}
+                          },
+                         
+                         
+                         {"type":"object","title":"On New Follwoer","properties":{"send_welcome_message":{"type":"boolean"},"message":{"type":"text"},
+                      "monitor_after":{"type":"integer","help_text":"Enter value in hours"},
+                      "event":{ "type": "string",
+             
+                                  'default': 'on_new_post', # default value for new items
+                                  'readonly': True,}
+                      }
+                          
+                         }
+                          
+                          ]
+            }},
+            
+
+            },
+            'required': ['usernames']
+            
+        },
+
+        
+    ],
+    
+    }
+    
+}
+
+from django_jsonform.models.fields import JSONField
+
 class BulkCampaign(models.Model):
     """_summary_
 
@@ -773,30 +1326,33 @@ class BulkCampaign(models.Model):
 
     customer = models.ForeignKey(
         Customer,
-        blank=False,
-        null=False,
+        blank=True,
+        null=True,
         on_delete=models.deletion.CASCADE
     )
 
-    activity_to_perform =models.CharField(
+    activity_to_perform=JSONField(schema=ITEMS_SCHEMA,        
+        )    
+    monitor=JSONField(schema=MONITOR_SCHEMA,
             #choices=ACTIVITY_CHOICES,
-            max_length=1000,
+            #max_length=1000,
             blank=True,
             null=True
+           
         )
     os=models.CharField(choices=(('android','Android'),('browser','Browser')),max_length=5000,blank=False,null=False,default='android')
     childbots=models.ManyToManyField(ChildBot,related_name='campaign')
-    devices=models.ManyToManyField(Device)
-    scrape_tasks=models.ManyToManyField(ScrapeTask,blank=True,null=True,related_name='campaign')
-    proxies=models.ManyToManyField(Proxy,blank=False,null=False,related_name='proxies')
-    localstore=models.BooleanField(default=False)
+    devices=models.ManyToManyField(Device,blank=True)
+    scrape_tasks=models.ManyToManyField(ScrapeTask,blank=True,related_name='campaign')
+    proxies=models.ManyToManyField(Proxy,blank=False,related_name='proxies')
+    #localstore=models.BooleanField(default=False)
     messaging=models.ManyToManyField(CampaignTextContent)
-    demographic=models.ManyToManyField(DemoGraphic)
+    #demographic=models.ManyToManyField(DemoGraphic)
     proxy_disable=models.BooleanField(default=False)
     target_settings=models.ForeignKey(TargetSettings,on_delete=models.CASCADE,null=True,blank=True)
-    sharing=models.ManyToManyField(Sharing,null=True)
-    settings=models.ManyToManyField(Settings)
-    server=models.ForeignKey(Server,blank=True,null=True,on_delete=models.CASCADE)
+    sharing=models.ManyToManyField(Sharing,blank=True)
+    #settings=models.ManyToManyField(Settings)
+    servers = models.ForeignKey(Server, blank=True, null=True, on_delete=models.SET_NULL)
     
 
     
@@ -1053,22 +1609,80 @@ class BulkCampaign(models.Model):
     def __str__(self):
         return self.name 
 
+class Task(models.Model):
+    
+    uuid=models.CharField(default=str(uuid.uuid1()),unique=True,max_length=50000)
+    ref_id=models.CharField(max_length=5000,default=uuid)
+    service = models.CharField(choices=SERVICES,
+                               default='instagram',
+                               max_length=50,
+                               db_index=True
+                               )
+    dependent_on=models.ForeignKey('self',blank=True,related_name='dependents',on_delete=models.CASCADE,null=True)
+    interact=models.BooleanField(default=False)
+    os=models.CharField(max_length=500,blank=False,null=False,choices=(('android','android'),('browser','browser')))
+    data_point = models.CharField(blank=False,
+                                null=False,
+                                max_length=500
+                               )
+    end_point = models.CharField(blank=False,
+                                null=False,
+                                max_length=500
+                               )
+    input=models.CharField(blank=True,
+                                null=True,
+                                max_length=500
+                               )
+    targets=models.JSONField(blank=True,null=True)
+    condition=models.CharField(blank=True,null=True,max_length=500) 
+    profile=models.TextField(blank=True,
+                          null=True)
+    device=models.TextField(blank=True,
+                          null=True)
+    targets=models.TextField(blank=True,null=True)
+    add_data=models.JSONField(blank=True,null=True)
+   
+    repeat=models.BooleanField(default=False)
+    repeat_duration=models.CharField(max_length=20,blank=True,null=True)
+    status=models.CharField(max_length=100,default='pending',choices=(('pending','pending'),('running','running'),('failed','failed'),('completed','completed')))
+    last_state_changed_at=models.FloatField(blank=True,null=True)
+    report=models.BooleanField(default=False)
+    retries_count=models.IntegerField(default=0)
+    paused=models.BooleanField(default=False)
+    
+    def save(self, *args, **kwargs):
+        if not self.uuid:
+            self.uuid = uuid.uuid4()
+        super().save(*args, **kwargs)
 
+    def __str__(self):
+        return self.ref_id                
+
+    username=models.CharField(max_length=225,blank=False,unique=True,null=True)
+    info=models.JSONField(default=dict,blank=False,null=False)
+    
+    versions=models.JSONField(default=dict)
+    def __str__(self):
+        return str(self.username)
 
         return self.name
-from django.db.models.signals import post_save  # Signal for post-save operations
+
+
+from django.db.models.signals import post_save,m2m_changed  # Signal for post-save operations
 from django.dispatch import receiver
-    
-@receiver(post_save,sender=BulkCampaign)
-def post_save_handler(sender, instance, created, **kwargs):
-    print('haey')
-    if not created:  # Check if object is newly created
+
+@receiver(m2m_changed, sender=BulkCampaign.childbots.through)
+def post_save_handler(sender, instance,  **kwargs):
+
         from sessionbot.worker_comm_utils import communicate_bulk_campaign_update_with
-        communicate_bulk_campaign_update_with(instance)
-        # Pass relevant data to your utility function
+      
+ 
         print(instance)
+        # Assuming communicate_bulk_campaign_update_with does something with the instance
+        communicate_bulk_campaign_update_with(instance)
 
-
+        print("BulkCampaign instance:", instance)   
+#m2m_changed.connect(post_save_handler, sender=BulkCampaign.childbots.through)    
 class Todo(models.Model):
     name = models.CharField(max_length=255)
     #os=models.CharField(choices=(('android','android'),('browser','browser')))
