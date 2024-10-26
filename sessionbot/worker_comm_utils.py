@@ -126,7 +126,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                 if act=='follow':
                     t=task.copy()
                     t['data_point']='search_user_and_interact'
-                    t['bulkaction']=True
+                    
                     t['targets']=inp['target_profile']
                     t['os']=inp['os']
                     t['activity_to_perform']='follow'
@@ -134,7 +134,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                 elif act=='like':
                     t=task.copy()
                     t['data_point']='search_post_and_interact'
-                    t['bulkaction']=True
+                    
                     t['targets']=inp['target_profile']
                     t['os']=inp['os']
                     t['activity_to_perform']='like'
@@ -142,7 +142,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                 elif act=='dm':
                     t=task.copy()
                     t['data_point']='send_dm'
-                    t['bulkaction']=True
+                    
                     t['targets']=inp['target_profile']
                     t['os']=inp['os']
                     t['activity_to_perform']='like'
@@ -150,7 +150,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                 elif act=='share_post_as_story':
                     t=task.copy()
                     t['data_point']='share_post_as_story'
-                    t['bulkaction']=True
+                
                     t['targets']=inp['target_profile']
                     t['os']=inp['os']
                     t['activity_to_perform']='like'
