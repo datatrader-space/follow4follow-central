@@ -242,7 +242,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
         print(bot.username)
         for job in jobs:
             _={}
-            exstn_tasks=Task.objects.all().filter(ref_id=automation_task.id).filter(end_point='interact').filter(data_point=job['data_point']).filter(profile=bot.username).filter(add_data=task['add_data'])
+            exstn_tasks=Task.objects.all().filter(ref_id=automation_task.id).filter(end_point='interact').filter(data_point=job['data_point']).filter(profile=bot.username).filter(add_data=task.get('add_data',{}))
             if len(exstn_tasks)>0:
                 print('found extn task')
                 if task.get('dependent_on_id'):
