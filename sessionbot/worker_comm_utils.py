@@ -1,6 +1,6 @@
 import uuid
 from django.forms import model_to_dict
-from sessionbot.models import BulkCampaign, Task
+from sessionbot.models import BulkCampaign, Device, Task
 import requests
 import json
 
@@ -49,22 +49,21 @@ import uuid
 
 
 def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
-    # print("Processing Bulk Campaign:", bulk_campaign)
+    print("Processing Bulk Campaign:", bulk_campaign)
 
     if not bulk_campaign.servers:
-        # print("NO SERVER FOUND")
+        print("NO SERVER FOUND")
         return
 
     worker_url = f"{bulk_campaign.servers.public_ip}crawl/tasks/"
-    # print(f"Connected server: ID: {bulk_campaign.servers.id}, Public IP: {bulk_campaign.servers.public_ip}")
+    print(f"Connected server: ID: {bulk_campaign.servers.id}, Public IP: {bulk_campaign.servers.public_ip}")
 
     scrape_tasks = bulk_campaign.scrape_tasks.all()
-    # print("Scrape Tasks:", scrape_tasks)
-
     _targets = ",".join(scrape_task.input for scrape_task in scrape_tasks)
+    print("Targets:", _targets)
 
     if not bulk_campaign.activity_to_perform:
-        # print("No activities to perform found.")
+        print("No activities to perform found.")
         return
 
     tasks = []  # This will hold all the task dictionaries to send
@@ -72,7 +71,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
     from django.forms import model_to_dict
     import uuid
     automation_task=bulk_campaign
-    print(bulk_campaign.childbots)
+   
     scrape_tasks=automation_task.scrape_tasks.all()
     _targets=[]
     jobs=[]
@@ -80,17 +79,28 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
         _targets.append(scrape_task.input)
     _targets=','.join(_targets)
   
+    acts=automation_task.activity_to_perform
 
-    for i,activity in enumerate(automation_task.activity_to_perform):
+    print("Activities to Performed", acts)
+    
+    for activity in acts:
+        end_point = activity['Page'].get('end_point')
+        print(f"Processing Activity with End_Point: {end_point}")
+        
+        #print(activity['Page'].get('end_point'))
+        #task={}
         task={'service':automation_task.service,
           'ref_id':automation_task.id,
-          'os':automation_task.os
+          'os':automation_task.os,
                         
         }
-        
-        if not activity.get('end_point'):
-            print(activity)
+
+        #if not activity['Page'].get('end_point'):
+        if not end_point:
+            print('no endpoint specified for activity, skipping.')
+           
             continue
+       
         repeat=False
         repeat_duration=None
         inp=activity['Page']
@@ -106,13 +116,13 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
         
         if task['data_point']=='search_user_and_interact':
             task.update({'targets':_targets})
-            task['add_data'].update({'messaging':automation_task.messaging.all().values_list(flat=True)})
+            task['add_data'].update({'messaging':list(automation_task.messaging.all().values())})
         if task['data_point']=='bulk_task':
-            
+            #print('bulk task')
             activity_to_perform=inp['activity_to_perform'].split(',')
-            print(activity_to_perform)
+            #print(activity_to_perform)
             for act in activity_to_perform:
-                print(activity)
+                
                 if act=='follow':
                     t=task.copy()
                     t['data_point']='search_user_and_interact'
@@ -157,8 +167,9 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
 
         if repeat:
             task.update({'repeat':True,'repeat_duration':repeat_duration})
+      
         jobs.append(task)
-
+        
 
     
      
@@ -199,7 +210,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                         comment=False
                         if event.get('comment'):
                             comment=event.get('comments')
-                        task={'service':automation_task.service,
+                        _={'service':automation_task.service,
                             'interact':False,
                             'end_point':'interact',
                             'data_point':'search_user_and_interact',                               
@@ -220,25 +231,28 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                             'ref_id':automation_task.id,
                             'status':'completed',
                         }
-                        jobs.append(task)
+                        jobs.append(_)
                         
     tasks=[]
+    
     from sessionbot.models import ChildBot
-    print(bulk_campaign.id)
-    print(ChildBot.objects.all().filter(campaign=bulk_campaign))
-    print('no')
+   
+  
     for bot in automation_task.childbots.all():
+        print(bot.username)
         for job in jobs:
-            print('**')
-            """             exstn_tasks=Task.objects.all().filter(ref_id=automation_task.id).filter(end_point='interact').filter(data_point=job['data_point']).filter(profile=bot.username).filter(add_data=task['add_data'])
+            _={}
+            exstn_tasks=Task.objects.all().filter(ref_id=automation_task.id).filter(end_point='interact').filter(data_point=job['data_point']).filter(profile=bot.username).filter(add_data=task['add_data'])
             if len(exstn_tasks)>0:
+                print('found extn task')
                 if task.get('dependent_on_id'):
                     if exstn_tasks.filter(dependent_on=task['dependent_on_id']):
                         continue
                 else:
+                    print('passed duplicate ')
                     continue
-            """
-            """             if job['data_point']=='search_user_and_interact':
+
+            if job['data_point']=='search_user_and_interact':
                 if not _targets:
                     dup_check=exstn_tasks.filter(targets='')
                 else:
@@ -247,29 +261,37 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                     
                     print('Excluding Duplicate Task Creation')
                     continue
-            else: 
+            else:
                 if len(exstn_tasks)>0:
-                    continue"""
-            import uuid
-            job.update({'profile':bot.username,'uuid':str(uuid.uuid1()),})
-            tasks.append(job)
-            print(tasks)
+                    continue
+
+            job.update({'profile':bot.username,'device':bot.device.serial_number if bot.device else False,'uuid':str(uuid.uuid1())})
+            
+            t=Task(**job)
+            t.save()
+            _=job.copy()
+            _.update({'uuid':t.uuid})
+            tasks.append(_)
+
+    print("Final Task Generated: ", tasks)
+             
+    
     return tasks
 
 def communicate_bulk_campaign_update_with(bulkcampaign):
 
-    # print('MODEL TO DICT: ', model_to_dict(bulkcampaign))
+    #print('MODEL TO DICT: ', model_to_dict(bulkcampaign))
     r = requests.session()
     workers = []
 
     bots = []
     devices = []
     tasks = convert_bulk_campaign_to_worker_tasks(bulkcampaign)
-    print('yeah')
-    # print('CONVERTING AUTOMATION TASK TO WORKER TASK: ', tasks)
+    #print(tasks)
+    #print('CONVERTING AUTOMATION TASK TO WORKER TASK: ', tasks)
 
     for bot in bulkcampaign.childbots.all():
-
+        
         if bulkcampaign.os == "android":
 
             if bot.device == None:
@@ -279,20 +301,39 @@ def communicate_bulk_campaign_update_with(bulkcampaign):
         _bot = model_to_dict(bot)
         _bot.pop("created_on", None)
         _bot.pop("cookie")
-        _bot["device"] = bot.device.__str__()
-    # print(bots)
+        _bot.pop("profile_picture")
+        _bot.pop("dob")
+        _bot.pop('followers')
+        _bot.pop('following')
+        _bot.pop('post_count')
+        _bot.pop('first_name')
+        _bot.pop('last_name')
+        _bot.pop('state')
+        _bot.pop('challenged')
+        _bot.pop('logged_in_on_servers')
+        _bot.pop('customer')
+        _bot.pop('bio')
+        _bot["device"] = bot.device.serial_number
+        _bot.pop('email_provider')
+        _bot.pop('id')
+        bots.append(_bot)
     if bulkcampaign.os == "android":
         for device in bulkcampaign.devices.all():
-            device = model_to_dict(device)
-            profiles = []
-            for profile in device["profiles"]:
-                profile = model_to_dict(profile)
-                profile.pop("created_on")
-                profile.pop("cookie")
-                profiles.append(profile)
+            device_data = model_to_dict(device)
 
-            device["profiles"] = profiles
-            devices.append(device)
+            connected_to_server = device_data.pop('connected_to_server', None)
+            profiles = []
+
+
+            devices.append(device_data)
+
+            for device in devices:
+                serial_number = device.get('serial_number')
+                if serial_number:
+                    Device.objects.update_or_create(
+                        serial_number=serial_number,
+                        defaults=device
+                    )
     scrape_tasks = []
     for task in bulkcampaign.scrape_tasks.all():
         # bots=[]
@@ -306,46 +347,23 @@ def communicate_bulk_campaign_update_with(bulkcampaign):
         scrape_task["childbots"] = bots
         scrape_tasks.append(scrape_task)
 
-    messaging = []
-    for messag in bulkcampaign.messaging.all():
-        messaging.append(model_to_dict(messag))
-    sharing = []
-    for shar in bulkcampaign.sharing.all():
-        sharing.append(model_to_dict(shar))
-    settings = []
-    proxies = bulkcampaign.proxies.all()
-    data = {
-        "action": "create",
-        "id": bulkcampaign.id,
-        "name": bulkcampaign.name,
-        "service": bulkcampaign.service,
-        "activity_to_perform": bulkcampaign.activity_to_perform,
-        "os": bulkcampaign.os,
-        "proxy_disable": bulkcampaign.proxy_disable,
-        "blacklist": "",
-        "required_interactions": 10000,
-        "launch_datetime": None,
-        "stop_datetime": None,
-        "internal_state": "active",
-        "campaign_state": "launched",
-        "is_completed": False,
-        "is_deleted": False,
-        "media_id": None,
-        "comment_id": None,
-        "childbots": bots,
-        "devices": devices,
-        "scrape_tasks": scrape_tasks,
-        "messaging": messaging,
-        "sharing": sharing,
-    }
-    worker_url = f"{bulkcampaign.servers.public_ip}"
-    worker_tasks_url=worker_url+'/crawl/api/tasks'
-    worker_devices_url=worker_url+'/crawl/devices/'
-    worker_bots_url=worker_url+'/crawl/childbots/'
-    print(tasks)
-    print(worker_url)
-    r.post(worker_devices_url,data=json.dumps(tasks))
-    r.post(worker_bots_url,data=json.dumps(bots))
-    
 
+
+    worker_url = f"{bulkcampaign.servers.public_ip}"
+    worker_tasks_url=worker_url+'crawl/api/tasks/'
+
+    print("WORKER_URL: ", worker_tasks_url)   
+    ''' 
+    r.post(resources_url,data=json.dumps({'resources':[
+                            {'type':'device','data':devices,'method':'create'},
+                            {'type':'bot','data':bots
+                             ,'method':'create'},
+                            
+                                                
+                                                
+                                                
+                                                ]}))
+                                            '''
     r.post(worker_tasks_url,data=json.dumps(tasks))
+    import datetime as dt
+    print('sent request to worker at'+str(dt.datetime.now()))

@@ -1,9 +1,9 @@
-from django.http import JsonResponse, HttpRequest
+from django.http import HttpResponse, JsonResponse, HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets
-from .models import Device, Server, Proxy
+from .models import BulkCampaign, ChildBot, Device, Server, Proxy
 import json
 import requests
 import logging
@@ -31,6 +31,8 @@ def createResource(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 def createDeviceResource(request: HttpRequest) -> JsonResponse:
+    response = {} 
+    
     if request.method == 'POST':
         try:
             payload = json.loads(request.body.decode("utf-8"))
@@ -75,8 +77,6 @@ def createDeviceResource(request: HttpRequest) -> JsonResponse:
                 'status': 'success',
                 'data': response_data
             }
-        except Exception as e:
-            print(e)
         except json.JSONDecodeError:
             response = {'status': 'error', 'message': 'Invalid JSON payload'}
         except IntegrityError:
@@ -87,6 +87,81 @@ def createDeviceResource(request: HttpRequest) -> JsonResponse:
         response = {'status': 'bad_request_type'}
 
     return JsonResponse(response)
+from .worker_comm_utils import communicate_bulk_campaign_update_with
+@csrf_exempt
+def bulk_campaign(request):
+    if request.method == 'GET':
+        campaigns = BulkCampaign.objects.all().values()
+        return JsonResponse(list(campaigns), safe=False)
+
+    elif request.method == 'POST':
+        data = json.loads(request.body)
+        #print(data)
+
+        if data.get('campaigns', []):
+            for campaign in data['campaigns']:
+                method = campaign.get('method')
+                campaign_data = campaign.get('data', {})
+                print(campaign_data)
+                
+                campaign_id = campaign_data.get('id')
+                servers_id = campaign_data.get('servers', None)
+                bots = campaign_data.get('childbots', None)
+                devices = campaign_data.get('devices', None)
+                scrape_tasks = campaign_data.get('scrape_tasks', None)
+                proxies = campaign_data.get('proxies', None)
+                messaging = campaign_data.get('messaging', None)
+                sharing = campaign_data.get('sharing', None)
+
+                #print(campaign_data)
+
+                campaign_data.update({'servers_id': servers_id})
+                campaign_data.pop('servers', None)
+                campaign_data.pop('childbots', None)
+                campaign_data.pop('devices', None)
+                campaign_data.pop('scrape_tasks', None)
+                campaign_data.pop('proxies', None)
+                campaign_data.pop('messaging', None)
+                campaign_data.pop('sharing', None)
+
+                if method in ['create', 'update']:
+                    if method == 'create':
+                        campaign_instance = BulkCampaign.objects.create(**campaign_data)
+                    elif method == 'update':
+                        try:
+                            campaign_instance = BulkCampaign.objects.get(id=campaign_id)
+                            for key, value in campaign_data.items():
+                                setattr(campaign_instance, key, value)
+                            campaign_instance.save()
+                        except BulkCampaign.DoesNotExist:
+                            return JsonResponse({'error': 'Campaign not found'}, status=404)
+
+                    if bots:
+                        campaign_instance.childbots.set(bots)
+                    if devices:
+                        campaign_instance.devices.set(devices)
+                    if scrape_tasks:
+                        campaign_instance.scrape_tasks.set(scrape_tasks)
+                    if proxies:
+                        campaign_instance.proxies.set(proxies)
+                    if messaging:
+                        campaign_instance.messaging.set(messaging)
+                    if sharing:
+                        campaign_instance.sharing.set(sharing)
+
+                    
+                    communicate_bulk_campaign_update_with(campaign_instance)
+
+                elif method == 'delete':
+                    try:
+                        campaign_instance = BulkCampaign.objects.get(id=campaign_id)
+                        campaign_instance.delete()
+                    except BulkCampaign.DoesNotExist:
+                        return JsonResponse({'error': 'Campaign not found'}, status=404)
+
+        return JsonResponse({'status': 'success'}, status=200)
+
+    return HttpResponse('Method not allowed', status=405)
 
 logger = logging.getLogger(__name__)
 @csrf_exempt

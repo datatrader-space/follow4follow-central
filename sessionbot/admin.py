@@ -43,9 +43,28 @@ admin.site.register(ChildBot,SessionBotAdmin)
 admin.site.register(Server)
 
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ['uuid', 'status', 'service', 'ref_id'] 
+    list_filter=['status','os','end_point','data_point','device']
+    list_display=['uuid','service','end_point','data_point','os','repeat','profile','device','status','retries_count']
+    actions = ['start_tasks','stop_tasks','resume_tasks','pause_tasks']
+    search_fields = (
+                     'profile',
 
-admin.site.register(Task, TaskAdmin)
+                     )
+    @admin.action(description='Pause Seleted Tasks')
+    def pause_tasks(self, request, queryset):
+        queryset.update(paused=True)
+    @admin.action(description='Start Seleted Tasks')
+    def start_tasks(self,request,queryset):
+        queryset.update(status='pending')
+    @admin.action(description='Stop Seleted Tasks')
+    def stop_tasks(self,request,queryset):
+        queryset.update(status='completed')
+    @admin.action(description='Resume Seleted Tasks')
+    def resume_tasks(self,request,queryset):
+        queryset.update(status='pending').update(paused=False)
+admin.site.register(Task,TaskAdmin) 
+
+
 
     
 admin.site.register(Device)

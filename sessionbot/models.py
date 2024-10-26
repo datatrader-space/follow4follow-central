@@ -328,12 +328,13 @@ class ChildBot(models.Model):
                                 blank=False,
                                 null=False
                                 )
-    phone_number=models.IntegerField(blank=True,null=True)
+    phone_number=models.IntegerField(blank=True,null=True, default=00000000000)
 
     email_address = models.EmailField(max_length=254,
                                       blank=True,
                                       null=True,
-                                      db_index=True
+                                      db_index=True,
+                                      default='none@gmail.com'
                                       )
 
     email_password = models.CharField(max_length=100,
@@ -345,6 +346,7 @@ class ChildBot(models.Model):
         max_length=254,
         blank=True,
         null=True,
+        default='none@gmail.com'
     )
     logged_in_on_servers=models.ForeignKey(Server,on_delete=models.SET_NULL,null=True)
     imap_email_host = models.CharField(max_length=100,
@@ -373,7 +375,7 @@ class ChildBot(models.Model):
 
     post_count = models.PositiveIntegerField(default=0)
 
-    profile_picture = models.URLField(blank=True, null=True, max_length=500)
+    profile_picture = models.URLField(blank=True, null=True, max_length=500, default="https://th.bing.com/th/id/R.363f7e495d2d2e4f1407657b52c37cdb?rik=wCUstSresWmNMA&pid=ImgRaw&r=0")
 
     dob = models.DateField(null=True, blank=True)
 
@@ -388,7 +390,7 @@ class ChildBot(models.Model):
     created_on = models.DateField(default=timezone.now)
 
     # TODO create a default storage class to use for cookies
-    cookie = models.FileField(upload_to='login/cookies', blank=True, null=True)
+    cookie = models.FileField(upload_to='login/cookies', blank=True, null=True, default="https://gist.github.com/mrunkel/7f16fad35250da476ab0cc58aebde7ec")
 
     
     email_provider = models.ForeignKey(EmailProvider,
@@ -412,8 +414,12 @@ class ChildBot(models.Model):
         auto_now=False, auto_now_add=False,
         editable=False, blank=True, null=True,
     )
+    
+    challenged = models.BooleanField(default=False, help_text="Indicates if the bot is currently challenged.")
+
 
     class Meta:
+        unique_together = ('customer', 'username')
         unique_together = ('customer', 'username')
         verbose_name = "Bot"
 
@@ -499,6 +505,7 @@ class ChildBot(models.Model):
             return name 
         if self.login_profile:
             return self.login_profile.username 
+        
         return f'ChildBot::{self.id}'
 
 
@@ -803,13 +810,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'explore_home_page', # default value for new items
-                'readonly': True,
+                
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+               
             },
           }
         },
@@ -854,13 +861,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'explore_explore_page', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -885,13 +892,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'watch_story', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -963,13 +970,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'watch_reels', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -1010,13 +1017,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'check_messenger', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -1061,13 +1068,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'search_user_and_interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -1114,13 +1121,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'send_dm', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -1163,13 +1170,13 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'bulk_task', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -1199,19 +1206,19 @@ ITEMS_SCHEMA ={
               "type": "string",
              
                 'default': 'unfollow', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
              "data_point": {
               "type": "string",
              
                 'default': 'unfollow_users', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
             "end_point": {
               "type": "string",
              
                 'default': 'interact', # default value for new items
-                'readonly': True,
+                'readonly': False
             },
           }
         },
@@ -1234,7 +1241,7 @@ MONITOR_SCHEMA=   {
               "type": "string",
              
                 'default': 'user', # default value for new items
-                'readonly': True,
+                'readonly': False
               
             },
                 "usernames":{"type":"string"},
@@ -1244,16 +1251,16 @@ MONITOR_SCHEMA=   {
                           "event":{ "type": "string",
              
                                   'default': 'on_new_post', # default value for new items
-                                  'readonly': True,}}
+                                  'readonly': False}}
                           },
                          
                          
-                         {"type":"object","title":"On New Follwoer","properties":{"send_welcome_message":{"type":"boolean"},"message":{"type":"text"},
+                         {"type":"object","title":"On New Follower","properties":{"send_welcome_message":{"type":"boolean"},"message":{"type":"text"},
                       "monitor_after":{"type":"integer","help_text":"Enter value in hours"},
                       "event":{ "type": "string",
              
-                                  'default': 'on_new_post', # default value for new items
-                                  'readonly': True,}
+                                  'default': 'on_new_follower', # default value for new items
+                                  'readonly': False}
                       }
                           
                          }
@@ -1671,17 +1678,9 @@ class Task(models.Model):
 from django.db.models.signals import post_save,m2m_changed  # Signal for post-save operations
 from django.dispatch import receiver
 
-@receiver(m2m_changed, sender=BulkCampaign.childbots.through)
-def post_save_handler(sender, instance,  **kwargs):
 
-        from sessionbot.worker_comm_utils import communicate_bulk_campaign_update_with
-      
- 
-        print(instance)
-        # Assuming communicate_bulk_campaign_update_with does something with the instance
-        communicate_bulk_campaign_update_with(instance)
 
-        print("BulkCampaign instance:", instance)   
+        
 #m2m_changed.connect(post_save_handler, sender=BulkCampaign.childbots.through)    
 class Todo(models.Model):
     name = models.CharField(max_length=255)

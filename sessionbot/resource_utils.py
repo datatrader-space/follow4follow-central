@@ -80,12 +80,6 @@ def profile(**kwargs):
         logs.append(message)
 
     log_message(f"Entering profile with kwargs: {kwargs}")
-    from sessionbot.models import (
-        ChildBot,
-        EmailProvider,
-        Server,
-    )  # Ensure you have a Server model
-
     username = kwargs.get("username")
     if not username:
         log_message("Username is missing.")
@@ -130,33 +124,47 @@ def profile(**kwargs):
             "logs": logs,
         }
 
+    # Handle optional logged_in_on_servers field
     logged_in_on_servers = kwargs.get("logged_in_on_servers")
-    log_message(f"This is a received Logged Value: {logged_in_on_servers}")
+    server = None
+    if logged_in_on_servers:
+        log_message(f"Received Logged Value: {logged_in_on_servers}")
+        from sessionbot.models import Server
+        server = Server.objects.filter(name=logged_in_on_servers).first()
+        if not server or not server.public_ip:
+            log_message(f"Server details are missing or public IP is not found.")
+            server = None  # Server is optional, so no need to fail here
+    else:
+        log_message("Logged_in_on_servers is missing.")
 
-    # Fetch the server using logged_in_on_servers_id
-    server = Server.objects.filter(id=int(logged_in_on_servers)).first()
-    if not server or not server.public_ip:
-        log_message("Server details are missing or public IP is not found.")
-        return {
-            "response": "failed",
-            "message": "ProfileCreationFailed Server Details Missing",
-            "object": None,
-            "label": "ServerNotFound",
-            "logs": logs,
-        }
+    # Handle optional device field
+    device_serial_number = kwargs.get("device")
+    device = None
+    if device_serial_number:
+        log_message(f"Received device serial number: {device_serial_number}")
+        from sessionbot.models import Device
+        device = Device.objects.filter(serial_number=device_serial_number).first()
+        if device:
+            log_message(f"Device with serial number {device_serial_number} found.")
+        else:
+            log_message(f"Failed to find device with serial number {device_serial_number}.")
+    else:
+        log_message("Device is missing.")
 
-    worker_url = f"{server.public_ip}crawl/childbots/"
+    from sessionbot.models import ChildBot, EmailProvider
 
-    print('This is Worker URL', worker_url)
-
-    # Check if the profile exists
+    # Check if the profile already exists
     c = ChildBot.objects.filter(service=service, username=username).first()
     if c:
         c.password = password
         c.email_address = email_address
         c.display_name = username
-        c.logged_in_on_servers_id = int(logged_in_on_servers)
+        if server:
+            c.logged_in_on_servers = server
+        if device:
+            c.device = device
         c.save()
+
         _c = model_to_dict(c)
         _c.pop("cookie")
         _c.pop("created_on")
@@ -169,20 +177,24 @@ def profile(**kwargs):
         log_message(f"Profile already exists for {username}.")
     else:
         log_message(f"Creating a new profile for {username}.")
-
         c = ChildBot(
             username=username,
             display_name=username,
             password=password,
             service=service,
             email_address=email_address,
-            logged_in_on_servers_id=int(logged_in_on_servers),
         )
+        if server:
+            c.logged_in_on_servers = server
+        if device:
+            c.device = device
         c.save()
+
         _c = model_to_dict(c)
         _c.pop("cookie")
         _c.pop("created_on")
 
+        # Handle optional email provider
         email_provider = kwargs.get("email_provider")
         email_password = kwargs.get("email_password")
 
@@ -211,8 +223,8 @@ def profile(**kwargs):
         else:
             c.email_password = email_password
             log_message(f"Email password set for {username}.")
-
         c.save()
+
         resp = {
             "response": "success",
             "message": f"Profile {username} Created Successfully",
@@ -229,7 +241,8 @@ def profile(**kwargs):
             "password": password,
             "email_address": email_address,
         }
-        print(worker_payload)
+        log_message(f"Sending payload to worker: {worker_payload}")
+        worker_url = f"{server.public_ip}crawl/childbots/" if server else "default_worker_url"
         response = requests.post(worker_url, json=worker_payload)
         response.raise_for_status()  # Raise exception if the request failed
         log_message(f"Successfully sent payload to worker: {response.json()}")
@@ -238,7 +251,6 @@ def profile(**kwargs):
 
     resp["logs"] = logs
     return resp
-
 
 def email_provider(**kwargs):
     print("Entering email_provider with kwargs:", kwargs)
@@ -365,12 +377,11 @@ def device(**kwargs):
 
     log_message(f"Entering device with kwargs: {kwargs}")
 
-    from sessionbot.models import Device, Server
-
     name = kwargs.get("name")
     serial_number = kwargs.get("serial_number")
     connected_to_server = kwargs.get("connected_to_server")
 
+    # Check mandatory fields
     if not serial_number:
         log_message("Serial Number Missing.")
         return {
@@ -398,11 +409,11 @@ def device(**kwargs):
             "label": "NameMissing",
             "logs": logs,
         }
+    from sessionbot.models import Server, Device
+    # Fetch the server instance by name
+    server = Server.objects.filter(name=connected_to_server).first()
 
-    d = Device.objects.all().filter(serial_number=serial_number)
-    c = Server.objects.all().filter(instance_id=connected_to_server).first()
-
-    if not c:
+    if not server:
         log_message("Server Not Found.")
         return {
             "response": "failed",
@@ -412,33 +423,33 @@ def device(**kwargs):
             "logs": logs,
         }
 
-    if d:
-        d = d[0]
-        d.connected_to_server = c
-        d.name = name
-        d.save()
+    # Check if device exists and update or create accordingly
+    device_queryset = Device.objects.filter(serial_number=serial_number)
+
+    if device_queryset.exists():
+        device_instance = device_queryset.first()
+        device_instance.connected_to_server = server
+        device_instance.name = name
+        device_instance.save()
         log_message(f"Device {serial_number} updated successfully.")
-        resp = {
+        return {
             "response": "success",
             "message": f"Device {serial_number} Updated Successfully",
-            "object": model_to_dict(d),
+            "object": model_to_dict(device_instance),
             "label": "DeviceUpdated",
             "logs": logs,
         }
     else:
-        d = Device(name=name, serial_number=serial_number, connected_to_server=c)
-        d.save()
+        device_instance = Device(name=name, serial_number=serial_number, connected_to_server=server)
+        device_instance.save()
         log_message(f"Device {serial_number} created successfully.")
-        resp = {
+        return {
             "response": "success",
             "message": f"Device {serial_number} Created Successfully",
-            "object": model_to_dict(d),
+            "object": model_to_dict(device_instance),
             "label": "DeviceCreated",
             "logs": logs,
         }
-
-    return resp
-
 
 @shared_task()
 def convert_bulk_campaign_to_workflow_for_vivide_mind_worker(**kwargs):

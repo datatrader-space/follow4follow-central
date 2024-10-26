@@ -1,43 +1,65 @@
 from django.urls import path
 
-from .views import createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource
+from .views import bulk_campaign, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource
 from django.urls import path, include
 from sessionbot.models import ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
 from rest_framework import routers, serializers, viewsets
 
 # Serializers define the API representation.
 class BulkCampaignSerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
+    devices = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    childbots = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    servers = serializers.PrimaryKeyRelatedField(read_only=True)
+    scrape_tasks = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    messaging = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    proxies = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+
     class Meta:
         model = BulkCampaign
-        exclude = ['customer',   'target_settings']
+        exclude = ['customer', 'target_settings']
 
 class BulkCampaignViewSet(viewsets.ModelViewSet):
     queryset = BulkCampaign.objects.all()
     serializer_class = BulkCampaignSerializer
 
-class BotSerializer(serializers.HyperlinkedModelSerializer):
-    logged_in_on_servers = serializers.PrimaryKeyRelatedField(queryset=Server.objects.all())
-
-    
-    class Meta:
-        model = ChildBot
-        exclude = ['device', 'customer', 'email_provider']
-        
-class BotViewSet(viewsets.ModelViewSet):
-    queryset = ChildBot.objects.all()
-    serializer_class = BotSerializer
-
 class ServerSerializer(serializers.HyperlinkedModelSerializer):
     class Meta:
         model =Server
+        field=['name']
         exclude=['customer']
        
 class ServerViewSet(viewsets.ModelViewSet):
     queryset = Server.objects.all()
     serializer_class = ServerSerializer
 
+class BotSerializer(serializers.HyperlinkedModelSerializer):
+    logged_in_on_servers = serializers.SlugRelatedField(
+        queryset=Server.objects.all(),
+        slug_field='name',  
+    )
+
+    device = serializers.SlugRelatedField(
+        queryset=Device.objects.all(),
+        slug_field='serial_number',  
+    )
+
+    cookie = serializers.CharField(required=False, allow_null=True)
+    
+    class Meta:
+        model = ChildBot
+        exclude = ['customer', 'email_provider']
+        
+class BotViewSet(viewsets.ModelViewSet):
+    queryset = ChildBot.objects.all()
+    serializer_class = BotSerializer
+
+
 class DeviceSerializer(serializers.HyperlinkedModelSerializer):
-    connected_to_server = serializers.PrimaryKeyRelatedField(queryset=Server.objects.all())
+    connected_to_server = serializers.SlugRelatedField(
+        queryset=Server.objects.all(),
+        slug_field='name',  
+    )
 
     class Meta:
         model = Device
@@ -123,6 +145,7 @@ router.register(r'bulkcampaign', BulkCampaignViewSet)
 router.register(r'tasks', TaskViewSet)
 
 urlpatterns = [
+    path("api/resource/bulk-campaign/", bulk_campaign, name='bulk_campaign'),
     path("api/resource/create/", createResource, name="create_resource"),
     path("api/reports/logs", createResource, name="view_logs"),
     path('api/resource/', include(router.urls)),
