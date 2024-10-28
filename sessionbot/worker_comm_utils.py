@@ -351,9 +351,9 @@ def communicate_bulk_campaign_update_with(bulkcampaign):
 
     worker_url = f"{bulkcampaign.servers.public_ip}"
     worker_tasks_url=worker_url+'crawl/api/tasks/'
-
+    resources_url=worker_url+'crawl/api/tasks/'
     print("WORKER_URL: ", worker_tasks_url)   
-    ''' 
+    
     r.post(resources_url,data=json.dumps({'resources':[
                             {'type':'device','data':devices,'method':'create'},
                             {'type':'bot','data':bots
@@ -363,7 +363,7 @@ def communicate_bulk_campaign_update_with(bulkcampaign):
                                                 
                                                 
                                                 ]}))
-                                            '''
+                                            
     r.post(worker_tasks_url,data=json.dumps(tasks))
     import datetime as dt
     print('sent request to worker at'+str(dt.datetime.now()))
