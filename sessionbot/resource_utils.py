@@ -114,15 +114,7 @@ def profile(**kwargs):
         }
 
     email_address = kwargs.get("email_address")
-    if not email_address:
-        log_message(f"Email address is missing for {username}.")
-        return {
-            "response": "failed",
-            "message": f"ProfileCreationFailed for {username} Email Address Missing",
-            "object": None,
-            "label": "EmailNotFound",
-            "logs": logs,
-        }
+    phone_number=kwargs.get("phone_number")
 
     # Handle optional logged_in_on_servers field
     logged_in_on_servers = kwargs.get("logged_in_on_servers")
@@ -183,6 +175,7 @@ def profile(**kwargs):
             password=password,
             service=service,
             email_address=email_address,
+            phone_number=phone_number,
         )
         if server:
             c.logged_in_on_servers = server

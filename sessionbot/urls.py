@@ -12,6 +12,7 @@ class BulkCampaignSerializer(serializers.HyperlinkedModelSerializer):
     childbots = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     servers = serializers.PrimaryKeyRelatedField(read_only=True)
     scrape_tasks = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    sharing = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     messaging = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     proxies = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
 
@@ -24,6 +25,7 @@ class BulkCampaignViewSet(viewsets.ModelViewSet):
     serializer_class = BulkCampaignSerializer
 
 class ServerSerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
     class Meta:
         model =Server
         field=['name']
@@ -34,6 +36,7 @@ class ServerViewSet(viewsets.ModelViewSet):
     serializer_class = ServerSerializer
 
 class BotSerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
     logged_in_on_servers = serializers.SlugRelatedField(
         queryset=Server.objects.all(),
         slug_field='name',  
@@ -56,6 +59,7 @@ class BotViewSet(viewsets.ModelViewSet):
 
 
 class DeviceSerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
     connected_to_server = serializers.SlugRelatedField(
         queryset=Server.objects.all(),
         slug_field='name',  
@@ -79,6 +83,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     
 class MessagingSerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
     class Meta:
         model =CampaignTextContent
         fields = '__all__'
@@ -87,6 +92,7 @@ class MessagingViewSet(viewsets.ModelViewSet):
     serializer_class=MessagingSerializer
 
 class ProxySerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
     class Meta:
         model=Proxy
         exclude=['tagged_bad_on','customer']
@@ -103,6 +109,7 @@ class SettingsViewSet(viewsets.ModelViewSet):
     queryset=Settings.objects.all()
     serializer_class=SettingsSerializer
 class SharingSerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
     class Meta:
         model=Sharing
         fields='__all__'
@@ -110,10 +117,8 @@ class SharingSerializer(serializers.HyperlinkedModelSerializer):
 class SharingViewSet(viewsets.ModelViewSet):
     queryset=Sharing.objects.all()
     serializer_class=SharingSerializer
-class ScrapeTaskSerializer(serializers.HyperlinkedModelSerializer):
-    childbot_ids = serializers.PrimaryKeyRelatedField(many=True, source='childbots', queryset=ChildBot.objects.all(), write_only=True)
-    childbots = serializers.StringRelatedField(many=True, read_only=True) 
-    
+class ScrapeTaskSerializer(serializers.HyperlinkedModelSerializer):    
+    id = serializers.IntegerField(read_only=True)
     class Meta:
         model=ScrapeTask
         exclude=['customer']
