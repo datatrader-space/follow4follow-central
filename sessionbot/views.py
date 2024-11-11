@@ -3,7 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets
-from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task
+from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task, Todo
 import json
 import requests
 import logging
@@ -236,7 +236,7 @@ def scrape_task(request):
         return JsonResponse({'status': 'success'}, status=200)
 
     return HttpResponse('Method not allowed', status=405)
-    
+
 logger = logging.getLogger(__name__)
 @csrf_exempt
 def deleteDeviceResource(request, serial_number: str) -> JsonResponse:
@@ -410,6 +410,74 @@ def createProxyResource(request: HttpRequest) -> JsonResponse:
         response = {'status': 'bad_request_type'}
 
     return JsonResponse(response)
+
+@csrf_exempt
+def todo_view(request):
+    if request.method == 'GET':
+        todos = Todo.objects.all().values()
+        return JsonResponse(list(todos), safe=False)
+
+    elif request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+
+        if not data.get('todo'):
+            return JsonResponse({'error': 'No todo tasks provided'}, status=400)
+
+        for task in data['todo']:
+            method = task.get('method')
+            task_data = task.get('data', {})
+
+            if method not in ['create', 'update', 'delete']:
+                return JsonResponse({'error': 'Invalid method provided'}, status=400)
+
+            task_id = task_data.get('id')
+            name = task_data.get('name')
+            caption = task_data.get('caption')
+            target_location = task_data.get('target_location')
+            google_drive_root_folder_name = task_data.get('google_drive_root_folder_name')
+            bots = task_data.get('bots', [])
+            files = task_data.get('files', [])
+
+            task_data.update({
+                'name': name,
+                'caption': caption,
+                'target_location': target_location,
+                'google_drive_root_folder_name': google_drive_root_folder_name,
+                'files': files,
+            })
+
+            task_instance = None
+
+            if method == 'create':
+                task_instance = Todo.objects.create(**task_data)
+                if bots:
+                    task_instance.bots.set(bots)
+
+            elif method == 'update':
+                try:
+                    task_instance = Todo.objects.get(id=task_id)
+                    for key, value in task_data.items():
+                        setattr(task_instance, key, value)
+                    task_instance.save()
+                    if bots:
+                        task_instance.bots.set(bots)
+                except Todo.DoesNotExist:
+                    return JsonResponse({'error': 'Todo task not found'}, status=404)
+
+            elif method == 'delete':
+                try:
+                    task_instance = Todo.objects.get(id=task_id)
+                    task_instance.delete()
+                except Todo.DoesNotExist:
+                    return JsonResponse({'error': 'Todo task not found'}, status=404)
+
+        return JsonResponse({'status': 'success'}, status=200)
+
+    return HttpResponse('Method not allowed', status=405)
+    
 
 import uuid
 
