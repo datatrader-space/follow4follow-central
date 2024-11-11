@@ -1,7 +1,7 @@
 @ECHO OFF
 
 REM Set virtual environment directory (replace with your desired path)
-SET "VENV_DIR=C:\central-production\vividmind_central\vividmind_central\venv"
+SET "VENV_DIR=C:\NorthRays\Projects\central-aadml\venv"
 
 REM Check if virtual environment exists
 IF EXIST "%VENV_DIR%\Scripts\activate.bat" (

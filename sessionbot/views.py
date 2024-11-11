@@ -3,7 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets
-from .models import BulkCampaign, ChildBot, Device, Server, Proxy
+from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task
 import json
 import requests
 import logging
@@ -88,6 +88,7 @@ def createDeviceResource(request: HttpRequest) -> JsonResponse:
 
     return JsonResponse(response)
 from .worker_comm_utils import communicate_bulk_campaign_update_with
+
 @csrf_exempt
 def bulk_campaign(request):
     if request.method == 'GET':
@@ -163,6 +164,79 @@ def bulk_campaign(request):
 
     return HttpResponse('Method not allowed', status=405)
 
+@csrf_exempt
+def scrape_task(request):
+    if request.method == 'GET':
+        scrape_tasks = ScrapeTask.objects.all().values()
+        return JsonResponse(list(scrape_tasks), safe=False)
+
+    elif request.method == 'POST':
+        data = json.loads(request.body)
+
+        if not data.get('tasks'):
+            return JsonResponse({'error': 'No tasks provided'}, status=400)
+
+        for task in data['tasks']:
+            method = task.get('method')
+            task_data = task.get('data', {})
+
+            if method not in ['create', 'update', 'delete']:
+                continue 
+
+            task_id = task_data.get('id')
+            scrape_type = task_data.get('scrape_type')
+            scrape_value = task_data.get('scrape_value')
+            os = task_data.get('os')
+            storage = task_data.get('storage')
+            profile_ids = task_data.get('profile_ids', [])
+            max_threads = task_data.get('max_threads')
+            max_requests_per_day = task_data.get('max_requests_per_day')
+            start_scraping = task_data.get('start_scraping', False)
+            server_id = task_data.get('server_id')
+
+            task_data.update({
+                'scrape_type': scrape_type,
+                'scrape_value': scrape_value,
+                'os': os,
+                'storage': storage,
+                'max_threads': max_threads,
+                'max_requests_per_day': max_requests_per_day,
+                'start_scraping': start_scraping,
+                'server_id': server_id
+            })
+
+            task_instance = None
+
+            if method == 'create':
+                task_instance = ScrapeTask.objects.create(**task_data)
+                if profile_ids:
+                    task_instance.profiles.set(profile_ids)
+
+            elif method == 'update':
+                try:
+                    task_instance = ScrapeTask.objects.get(id=task_id)
+                    for key, value in task_data.items():
+                        setattr(task_instance, key, value)
+                    task_instance.save()
+                    if profile_ids:
+                        task_instance.profiles.set(profile_ids)
+                except ScrapeTask.DoesNotExist:
+                    return JsonResponse({'error': 'Scrape task not found'}, status=404)
+
+            elif method == 'delete':
+                try:
+                    task_instance = ScrapeTask.objects.get(id=task_id)
+                    task_instance.delete()
+                except ScrapeTask.DoesNotExist:
+                    return JsonResponse({'error': 'Scrape task not found'}, status=404)
+
+            if task_instance and method in ['create', 'update']:
+                handle_scrape_task_creation(task_instance)
+
+        return JsonResponse({'status': 'success'}, status=200)
+
+    return HttpResponse('Method not allowed', status=405)
+    
 logger = logging.getLogger(__name__)
 @csrf_exempt
 def deleteDeviceResource(request, serial_number: str) -> JsonResponse:
@@ -336,3 +410,94 @@ def createProxyResource(request: HttpRequest) -> JsonResponse:
         response = {'status': 'bad_request_type'}
 
     return JsonResponse(response)
+
+import uuid
+
+@csrf_exempt
+def attendance_task(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+
+        print("Received Payload:", json.dumps(data, indent=2))
+
+        if data.get('end_point') == 'Attendance' and data.get('data_point') == 'complete_attendance':
+            
+            end_point = data['end_point']
+            data_point = data['data_point']
+            service = data.get('service', 'attendance')
+            repeat = data.get('repeat')
+            repeat_duration = data.get('repeat_duration')
+
+            add_data = {
+                'slack_token': data.get('slack_token'),
+                'slack_channel_id': data.get('slack_channel_id'),
+                'response_email': data.get('response_email'),
+                'attendance_type': data.get('attendance_type'),
+            }
+
+            if data['attendance_type'] == 'monthly':
+                add_data['select_month'] = data.get('select_month')
+            elif data['attendance_type'] == 'weekly':
+                add_data['weekly_start_date'] = data.get('weekly_start_date')
+                add_data['weekly_end_date'] = data.get('weekly_end_date')
+            elif data['attendance_type'] == 'timeframe':
+                add_data['start_date'] = data.get('start_date')
+                add_data['end_date'] = data.get('end_date')
+
+            server_id = data.get('servers') 
+            task_instance = Task.objects.create(
+                uuid=uuid.uuid4(),
+                end_point=end_point,
+                data_point=data_point,
+                service=service,
+                repeat=repeat,
+                repeat_duration=repeat_duration,
+                add_data=add_data
+            )
+
+            print("Created Task:", task_instance)
+
+            if server_id:
+                try:
+                    
+                    server = Server.objects.get(id=server_id)
+                    worker_url = f"{server.public_ip}crawl/tasks/"
+                    print(f"Connected server: ID: {server.id}, Public IP: {server.public_ip}")
+
+                    
+                    payload = {
+                        'end_point': data['end_point'],
+                        'data_point': data['data_point'],
+                        'service': data.get('service', 'attendance'),
+                        'repeat': data.get('repeat'),
+                        'repeat_duration': data.get('repeat_duration'),
+                        'add_data': add_data
+                    }
+
+                    print('Worker_payload', payload)
+
+                   
+                    if data['attendance_type'] == 'monthly':
+                        payload['select_month'] = data.get('select_month')
+                    elif data['attendance_type'] == 'weekly':
+                        payload['weekly_start_date'] = data.get('weekly_start_date')
+                        payload['weekly_end_date'] = data.get('weekly_end_date')
+                    elif data['attendance_type'] == 'timeframe':
+                        payload['start_date'] = data.get('start_date')
+                        payload['end_date'] = data.get('end_date')
+
+                   
+                    response = requests.post(worker_url, json=payload)
+                    if response.status_code == 200:
+                        print(f"Payload successfully posted to {worker_url}")
+                    else:
+                        print(f"Failed to post payload to {worker_url}. Status Code: {response.status_code}")
+                except Server.DoesNotExist:
+                    print(f"Server with ID {server_id} does not exist")
+                    return JsonResponse({'error': f"Server with ID {server_id} not found"}, status=404)
+
+            return JsonResponse({'status': 'success', 'task_id': task_instance.id}, status=201)
+
+        return JsonResponse({'error': 'Invalid payload'}, status=400)
+
+    return HttpResponse('Method not allowed', status=405)

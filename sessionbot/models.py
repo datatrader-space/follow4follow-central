@@ -30,6 +30,7 @@ EMAIL_SERVICES: Tuple[Tuple[str]] = (
 
 SERVICES: Tuple[Tuple[str]] = (
     ('instagram', 'Instagram'),
+    ('attendance','attendance'),
     ('twitter','twitter'),
     ('tiktok','tiktok')
 )
