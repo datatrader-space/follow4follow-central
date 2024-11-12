@@ -117,8 +117,10 @@ class SharingSerializer(serializers.HyperlinkedModelSerializer):
 class SharingViewSet(viewsets.ModelViewSet):
     queryset=Sharing.objects.all()
     serializer_class=SharingSerializer
+
 class ScrapeTaskSerializer(serializers.HyperlinkedModelSerializer):    
     id = serializers.IntegerField(read_only=True)
+    childbots = BotSerializer(many=True, read_only=True)
     class Meta:
         model=ScrapeTask
         exclude=['customer']
