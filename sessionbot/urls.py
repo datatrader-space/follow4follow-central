@@ -130,6 +130,9 @@ class ScrapeTaskViewSet(viewsets.ModelViewSet):
     serializer_class=ScrapeTaskSerializer  
 
 class TodoSerializer(serializers.HyperlinkedModelSerializer):
+    id = serializers.IntegerField(read_only=True)
+    bots = BotSerializer(many=True, read_only=True)
+
     class Meta:
         model=Todo
         fields='__all__'
