@@ -19,5 +19,5 @@ START "" celery --app vividmind beat --loglevel=INFO --scheduler django_celery_b
 START "" celery --app=vividmind worker --pool=eventlet --loglevel=INFO
 START "" ngrok http 80
 C:
-cd C:\Program Files\Redis 
+cd Redis 
 redis-server.exe

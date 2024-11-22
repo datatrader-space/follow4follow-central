@@ -1,7 +1,8 @@
 import os
+
 from celery import Celery
 from django.conf import settings
-
+import eventlet
 from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "vividmind.settings")
@@ -10,12 +11,15 @@ celery_app = Celery('vividmind')
 celery_app.config_from_object('django.conf:settings', namespace='CELERY')
 celery_app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
 
-""" celery_app.conf.beat_schedule = {
+celery_app.conf.beat_schedule = {
  
-    'profile_todo_monitor': {
-        'task': 'operationsession.tasks.bots.profile_todo_monitor',
+    'communicate_tasks_with_worker': {
+        'task': 'sessionbot.tasks.communicate_tasks_with_worker',
         'schedule': crontab(minute='*/5'),
     },
+ }
+
+"""
     'automation_servers_monitor': {
         'task': 'cloud.tasks.automation_servers_monitor',
         'schedule': crontab(minute='*/5'),

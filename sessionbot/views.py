@@ -3,10 +3,11 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets
-from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task, Todo
+from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Logs
 import json
 import requests
 import logging
+import sessionbot.handlers.scrapetask as scrapetask
 
 @csrf_exempt
 def createResource(request: HttpRequest) -> JsonResponse:
@@ -113,7 +114,7 @@ def bulk_campaign(request):
                 proxies = campaign_data.get('proxies', None)
                 messaging = campaign_data.get('messaging', None)
                 sharing = campaign_data.get('sharing', None)
-
+                monitor=campaign_data.get('monitor',False)
                 #print(campaign_data)
 
                 campaign_data.update({'servers_id': servers_id})
@@ -149,8 +150,10 @@ def bulk_campaign(request):
                         campaign_instance.messaging.set(messaging)
                     if sharing:
                         campaign_instance.sharing.set(sharing)
-
-                    
+                    if monitor:
+                        campaign_instance.monitor=monitor
+                        campaign_instance.save()
+                        
                     communicate_bulk_campaign_update_with(campaign_instance)
 
                 elif method == 'delete':
@@ -166,76 +169,264 @@ def bulk_campaign(request):
 
 @csrf_exempt
 def scrape_task(request):
-    if request.method == 'GET':
-        scrape_tasks = ScrapeTask.objects.all().values()
-        return JsonResponse(list(scrape_tasks), safe=False)
+   
 
-    elif request.method == 'POST':
-        data = json.loads(request.body)
+    if request.method == 'POST':
+        data = json.loads(request.body)    
+        print(data)  
+        method=data.get('method')
 
-        if not data.get('tasks'):
-            return JsonResponse({'error': 'No tasks provided'}, status=400)
+        if method =='get':
+            results=[]
+            if data.get('ids'):
+                for _id in data.get('ids',[]):
+                    obj=ScrapeTask.objects.all().filter(id=_id)
+                    if obj:
+                        obj=obj[0]
+                        res=model_to_dict(obj)
+                        vals=[]
+                        for input in res.input.split(','):
+                            if 'followers' in input:
+                                scrape_type='by_username'
+                            elif 'location' in input:
+                                scrape_type='by_location'
+                            elif 'keyword' in input:
+                                scrape_type='by_keyword'
+                            elif 'hashtag' in input:
+                                scrape_type='by_hashtag'
+                            vals.append(input.split('__')[1])
+                            res.pop('input')
+                            res.pop('customer')
+                        res.pop('childbots')
+                        res.update({'childbot_ids':list(obj.childbots.values_list('id','name'))})
+                        res.update({'scrape_type':scrape_type,'scrape_value':','.join(vals)})
+                        
+                    else:
+                        res=False
+                    results.append({_id:res})
+            else:
+                from django.forms import model_to_dict
+                vals=[]
+                for obj in ScrapeTask.objects.all():
+                    res=model_to_dict(obj)
+                    for input in obj.input.split(','):
+                            if 'followers' in input:
+                                scrape_type='by_username'
+                            elif 'location' in input:
+                                scrape_type='by_location'
+                            elif 'keyword' in input:
+                                scrape_type='by_keyword'
+                            elif 'hashtag' in input:
+                                scrape_type='by_hashtag'
+                            vals.append(input.split('__')[1])
+                    res.pop('input')
+                    res.pop('customer')
+                    res.pop('childbots')
+                    res.update({'childbot_ids':list(obj.childbots.values_list('id','display_name'))})
+                    res.update({'scrape_type':scrape_type,'scrape_value':','.join(vals)})
+                    results.append({obj.id:res})
+                    
+            print(results)
+            return JsonResponse(results,safe=False)
+        elif method=='create':
+            for task in data['data']:
+                print(task)
+                inputs=[]
+                
+                if method == 'create':                     
+                    task_data = task
+                    if not task.get('childbot_ids'):
+                        l=Logs(end_point='scrapetask',label='ERROR',message='Create Scrape task missing childbots. Ignoring the row. Data: '+str(task))
+                        l.save()
+                    task=scrapetask.handle_scrapetask_form_from_frontend(task)          
+                    if ScrapeTask.objects.filter(name=task.get('name')):
+                        print('Dup')
+                        l=Logs(end_point='scrapetask',label='ERROR',message='A Scrape task with the same name exists, Either Edit existing task or create new with similar name')
+                        l.save()
+                        return JsonResponse({'error': 'A Scrape task with the same name exists, Either Edit existing task or create new with similar name'}, status=404)
+                
+                    s=ScrapeTask(**task)
 
-        for task in data['tasks']:
-            method = task.get('method')
-            task_data = task.get('data', {})
+                    s.save()
+                    childbot_ids = task_data.get('childbot_ids', [])
+                    s.childbots.set(childbot_ids)
+                    print(childbot_ids)
+                    s.save()
+                    print(s.childbots.all())
+                    from sessionbot.handlers.scrapetask import handle_scrape_task
+                    try:
+                        handle_scrape_task(s)
+                    except Exception as e:
+                        import traceback
+                        l=Logs(message=traceback.format_exc(),label='ERROR',end_point='scrapetask')
+                        l.save()
+                        s.delete()
+        elif method == 'update':            
+                tasks = data.get('data',{})
+                for task in tasks:
+                    for key, value in task.items():
+                        obj=ScrapeTask.objects.filter(id=key)
+                        if obj:
+                            obj=obj[0]
+                            childbot_ids = value.get('childbot_ids', [])
+                            obj.childbots.set(childbot_ids)
+                            obj.save()
+                            print(obj.childbots.all())
+                            scrapetask.handle_scrape_task_creation(obj)
+                            l=Logs(message='New bots added to Scrape Task '+str(obj.name),end_point='scrapetask',label='WARNING')
 
-            if method not in ['create', 'update', 'delete']:
-                continue 
+                        else:
+                            l=Logs(message='Failed to Update Scrape Task. Object with Id doesnt exist. Data: '+str(value),end_point='scrapetask',label='WARNING')
+                            l.save()
+                            continue
+                return JsonResponse(status=200,data={'status':'success'})
 
-            task_id = task_data.get('id')
-            scrape_type = task_data.get('scrape_type')
-            scrape_value = task_data.get('scrape_value')
-            os = task_data.get('os')
-            storage = task_data.get('storage')
-            profile_ids = task_data.get('profile_ids', [])
-            max_threads = task_data.get('max_threads')
-            max_requests_per_day = task_data.get('max_requests_per_day')
-            start_scraping = task_data.get('start_scraping', False)
-            server_id = task_data.get('server_id')
 
-            task_data.update({
-                'scrape_type': scrape_type,
-                'scrape_value': scrape_value,
-                'os': os,
-                'storage': storage,
-                'max_threads': max_threads,
-                'max_requests_per_day': max_requests_per_day,
-                'start_scraping': start_scraping,
-                'server_id': server_id
-            })
+        elif method == 'delete':
+            ids = data.get('data',{}).get('ids')
+            for id in ids:
+                
+                    obj=ScrapeTask.objects.filter(id=id)
+                    if obj:
+                        obj=obj[0]
+                        scrapetask.handle_scrape_task_deletion(obj)
+        elif method =='change_state':
+            tasks = data.get('data',{})
+            for task in tasks:
+                for key, value in task.items():
+                    obj=ScrapeTask.objects.filter(id=key)
+                    if obj:
+                        obj=obj[0]
+                        scrapetask.handle_scrapetask_state_change(obj)
 
-            task_instance = None
-
-            if method == 'create':
-                task_instance = ScrapeTask.objects.create(**task_data)
-                if profile_ids:
-                    task_instance.profiles.set(profile_ids)
-
-            elif method == 'update':
-                try:
-                    task_instance = ScrapeTask.objects.get(id=task_id)
-                    for key, value in task_data.items():
-                        setattr(task_instance, key, value)
-                    task_instance.save()
-                    if profile_ids:
-                        task_instance.profiles.set(profile_ids)
-                except ScrapeTask.DoesNotExist:
-                    return JsonResponse({'error': 'Scrape task not found'}, status=404)
-
-            elif method == 'delete':
-                try:
-                    task_instance = ScrapeTask.objects.get(id=task_id)
-                    task_instance.delete()
-                except ScrapeTask.DoesNotExist:
-                    return JsonResponse({'error': 'Scrape task not found'}, status=404)
-
-            if task_instance and method in ['create', 'update']:
-                handle_scrape_task_creation(task_instance)
+           
 
         return JsonResponse({'status': 'success'}, status=200)
 
     return HttpResponse('Method not allowed', status=405)
+
+
+@csrf_exempt
+def todo(request):
+    import sessionbot.handlers.todo as todo
+    from sessionbot.models import Todo
+    if request.method == 'POST':
+        data = json.loads(request.body)      
+        method=data.get('method')
+        print(data)
+        if method =='get':
+            results=[]
+            if data.get('ids'):
+                for _id in data.get('ids',[]):
+                    obj=Todo.objects.all().filter(id=_id)
+                    
+                    if obj:
+                        obj=obj[0]
+                        res=model_to_dict(obj)
+                        res.pop('childbots')
+                        res.pop('file')
+                        res.update({'childbot_ids':list(obj.childbots.values_list('id','display_name'))})
+                        
+                    else:
+                        res=False
+                    results.append({_id:res})
+                    
+            else:
+                from django.forms import model_to_dict
+                vals=[]
+                for obj in Todo.objects.all():
+                    res=model_to_dict(obj)
+                    res.pop('childbots')
+                    res.update({'childbot_ids':list(obj.childbots.values_list('id','display_name'))})
+                    res.pop('file')
+                    results.append({obj.id:res})
+                    
+            print(results)
+            return JsonResponse(results,safe=False)
+        elif method=='create':
+            for task in data['data']:
+                print(task)
+
+                
+                if method == 'create':                     
+                       
+                    if Todo.objects.filter(name=task.get('name')):
+                        print('Dup')
+                        l=Logs(end_point='todo',label='ERROR',message='A TODO with the same name exists, Either Edit existing TODO or create new with similar name')
+                        l.save()
+                        return JsonResponse({'error': 'A TODO with the same name exists, Either Edit existing task or create new with similar name'}, status=404)
+                    else:
+                        existing_todos=Todo.objects.filter(google_drive_root_folder_name=task.get('google_drive_root_folder_name')).filter(childbots=task.get('bots'))                      
+                        if len(existing_todos)>0:
+                            l=Logs(end_point='todo',label='ERROR',message='A TODO with the same name google driver root folder and selected bot exists, We dont recommend creating duplicates')
+                            l.save()
+                        else:
+                            childbot_ids=task.pop('childbot_ids',False)
+                            task.pop('file',False)
+                            t=Todo(**task)
+                            t.save()
+                            
+                            if childbot_ids:
+                                t.childbots.set(childbot_ids)
+                
+                        import sessionbot.handlers.todo as todo
+                        try:
+                            todo.handle_todo_creation(t)
+                        except Exception as e:
+                            import traceback
+                            l=Logs(message=traceback.format_exc(),label='ERROR',end_point='todo')
+                            l.save()
+                            t.delete()   
+        elif method == 'update':            
+                tasks = data.get('data',{})
+                for task in tasks:
+                    print(task)
+                    for key, value in task.items():
+                        print(key)
+                        obj=Todo.objects.filter(id=int(key))
+                        print(obj)
+                        if obj:
+                            obj=obj[0]
+                            childbot_ids=value.pop('childbot_ids',False)
+                            if childbot_ids:
+                                obj.childbots.set(childbot_ids)
+                                obj.save()
+                                obj.childbots.all()
+                            todo.handle_todo_creation(obj)
+                            
+
+                            l=Logs(message='New bots added to Todo '+str(obj.name),end_point='todo',label='INFO')
+
+                        else:
+                            l=Logs(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
+                            l.save()
+                            continue
+                return JsonResponse(status=200,data={'status':'success'})
+
+
+        elif method == 'delete':
+            ids = data.get('data',{}).get('ids',[])
+            for id in ids:
+              
+                    obj=Todo.objects.filter(id=id)
+                    if obj:
+                        obj=obj[0]
+                        todo.handle_todo_deletion(obj)
+        elif method =='change_state':
+            tasks = data.get('data',{})
+            for task in tasks:
+                for key, value in task.items():
+                    obj=Todo.objects.filter(id=key)
+                    if obj:
+                        obj=obj[0]
+                        todo.handle_state_change(obj)
+           
+
+        return JsonResponse({'status': 'success'}, status=200)
+
+    return HttpResponse('Method not allowed', status=405)
+
+
 
 logger = logging.getLogger(__name__)
 @csrf_exempt
@@ -411,73 +602,6 @@ def createProxyResource(request: HttpRequest) -> JsonResponse:
 
     return JsonResponse(response)
 
-@csrf_exempt
-def todo_view(request):
-    if request.method == 'GET':
-        todos = Todo.objects.all().values()
-        return JsonResponse(list(todos), safe=False)
-
-    elif request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({'error': 'Invalid JSON format'}, status=400)
-
-        if not data.get('todo'):
-            return JsonResponse({'error': 'No todo tasks provided'}, status=400)
-
-        for task in data['todo']:
-            method = task.get('method')
-            task_data = task.get('data', {})
-
-            if method not in ['create', 'update', 'delete']:
-                return JsonResponse({'error': 'Invalid method provided'}, status=400)
-
-            task_id = task_data.get('id')
-            name = task_data.get('name')
-            caption = task_data.get('caption')
-            target_location = task_data.get('target_location')
-            google_drive_root_folder_name = task_data.get('google_drive_root_folder_name')
-            bots = task_data.get('bots', [])
-            files = task_data.get('files', [])
-
-            task_data.update({
-                'name': name,
-                'caption': caption,
-                'target_location': target_location,
-                'google_drive_root_folder_name': google_drive_root_folder_name,
-                'files': files,
-            })
-
-            task_instance = None
-
-            if method == 'create':
-                task_instance = Todo.objects.create(**task_data)
-                if bots:
-                    task_instance.bots.set(bots)
-
-            elif method == 'update':
-                try:
-                    task_instance = Todo.objects.get(id=task_id)
-                    for key, value in task_data.items():
-                        setattr(task_instance, key, value)
-                    task_instance.save()
-                    if bots:
-                        task_instance.bots.set(bots)
-                except Todo.DoesNotExist:
-                    return JsonResponse({'error': 'Todo task not found'}, status=404)
-
-            elif method == 'delete':
-                try:
-                    task_instance = Todo.objects.get(id=task_id)
-                    task_instance.delete()
-                except Todo.DoesNotExist:
-                    return JsonResponse({'error': 'Todo task not found'}, status=404)
-
-        return JsonResponse({'status': 'success'}, status=200)
-
-    return HttpResponse('Method not allowed', status=405)
-    
 
 import uuid
 
@@ -569,3 +693,15 @@ def attendance_task(request):
         return JsonResponse({'error': 'Invalid payload'}, status=400)
 
     return HttpResponse('Method not allowed', status=405)
+
+@csrf_exempt
+def logs(request):
+    if request.method == 'POST':
+        from sessionbot.models import Logs
+        data = json.loads(request.body)
+        print(data)
+       
+        logs=Logs.objects.all().filter(end_point=data.get('end_point')).order_by('-timestamp').values()
+        return JsonResponse(list(logs),safe=False)
+    return HttpResponse('Method not allowed', status=405)
+    

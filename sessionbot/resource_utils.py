@@ -119,10 +119,12 @@ def profile(**kwargs):
     # Handle optional logged_in_on_servers field
     logged_in_on_servers = kwargs.get("logged_in_on_servers")
     server = None
+    
     if logged_in_on_servers:
         log_message(f"Received Logged Value: {logged_in_on_servers}")
         from sessionbot.models import Server
         server = Server.objects.filter(name=logged_in_on_servers).first()
+        print(server)
         if not server or not server.public_ip:
             log_message(f"Server details are missing or public IP is not found.")
             server = None  # Server is optional, so no need to fail here
@@ -139,7 +141,9 @@ def profile(**kwargs):
         if device:
             log_message(f"Device with serial number {device_serial_number} found.")
         else:
-            log_message(f"Failed to find device with serial number {device_serial_number}.")
+            d=Device(serial_number=device_serial_number,name=device_serial_number)
+            d.save()
+            log_message(f"Failed to find device with serial number {device_serial_number}. Created new device")
     else:
         log_message("Device is missing.")
 

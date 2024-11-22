@@ -1,9 +1,9 @@
 import uuid
 from django.forms import model_to_dict
-from sessionbot.models import BulkCampaign, Device, Task
+from sessionbot.models import BulkCampaign, Device, Task,ScrapeTask
 import requests
 import json
-
+from sessionbot.models import Logs
 
 def communicate_todo_with_worker(todo):
     for bot in todo.bots.all():
@@ -64,7 +64,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
 
     if not bulk_campaign.activity_to_perform:
         print("No activities to perform found.")
-        return
+        
 
     tasks = []  # This will hold all the task dictionaries to send
 
@@ -84,7 +84,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
     print("Activities to Performed", acts)
     
     for activity in acts:
-        end_point = activity['Page'].get('end_point')
+        end_point = activity.get('Page',{}).get('end_point')
         print(f"Processing Activity with End_Point: {end_point}")
         
         #print(activity['Page'].get('end_point'))
@@ -174,10 +174,11 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
     
      
 
-    
+    print(model_to_dict(automation_task))
     if automation_task.monitor:
+
         for monitor_dict in automation_task.monitor:
-          
+            print(monitor_dict)
             for event in monitor_dict['onEvent']:
                 if event['event']=='on_new_post':
                     condition='has_new_post'
@@ -197,8 +198,14 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                                 'repeat':True if event['monitor_after'] else False,
                                 'repeat_duration':event['monitor_after'],
                                 'uuid':str(uuid.uuid1()),
-                                'ref_id':automation_task.id
+                                'ref_id':automation_task.id,
+                                'server_id':automation_task.servers.id
+
                             }
+                            alloted_bots=[]
+                            for bot in automation_task.childbots.all():
+                                alloted_bots.append(bot.username)
+                            task.update({'alloted_bots':','.join(alloted_bots)})
                             monitor_task=Task(**task)
                             monitor_task.save()
                         share_latest_post_as_story=False
@@ -239,16 +246,25 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
    
   
     for bot in automation_task.childbots.all():
-        print(bot.username)
+        if not bot.logged_in_on_servers:
+            l=Logs(end_point='bulkcampaign',label='INFO',message=bot.username+' doesnt have a server assigned. Ignoring the bot, please assign server to the bot, and edit/save bulkcampaign '+str(automation_task.name) +' again')
+            l.save()
+            continue
         for job in jobs:
             _={}
-            exstn_tasks=Task.objects.all().filter(ref_id=automation_task.id).filter(end_point='interact').filter(data_point=job['data_point']).filter(profile=bot.username).filter(add_data=task.get('add_data',{}))
+            exstn_tasks=Task.objects.all().filter(ref_id=automation_task.id).filter(end_point='interact').filter(data_point=job['data_point']).filter(profile=bot.username).filter(add_data=job.get('add_data',{}))
             if len(exstn_tasks)>0:
                 print('found extn task')
-                if task.get('dependent_on_id'):
-                    if exstn_tasks.filter(dependent_on=task['dependent_on_id']):
-                        continue
+                if job.get('dependent_on_id'):
+                    if exstn_tasks.filter(dependent_on=job['dependent_on_id']):
+                        exstn_tasks.update(repeat=job['repeat'])
+                        exstn_tasks.update(repeat_duration=job['repeat_duration'])
+                        exstn_tasks.update(registered=False)
                 else:
+                    exstn_tasks.update(repeat=job['repeat'])
+                    exstn_tasks.update(repeat_duration=job['repeat_duration'])
+                    exstn_tasks.update(registered=False)
+
                     print('passed duplicate ')
                     continue
 
@@ -265,7 +281,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
                 if len(exstn_tasks)>0:
                     continue
 
-            job.update({'profile':bot.username,'device':bot.device.serial_number if bot.device else False,'uuid':str(uuid.uuid1())})
+            job.update({'profile':bot.username,'device':bot.device.serial_number if bot.device else False,'uuid':str(uuid.uuid1()),'server':bot.logged_in_on_servers})
             
             t=Task(**job)
             t.save()
@@ -277,7 +293,6 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
              
     
     return tasks
-
 def communicate_bulk_campaign_update_with(bulkcampaign):
 
     #print('MODEL TO DICT: ', model_to_dict(bulkcampaign))
@@ -313,7 +328,7 @@ def communicate_bulk_campaign_update_with(bulkcampaign):
         _bot.pop('logged_in_on_servers')
         _bot.pop('customer')
         _bot.pop('bio')
-        _bot["device"] = bot.device.serial_number
+        _bot["device"] = bot.device.serial_number if bot.device else False
         _bot.pop('email_provider')
         _bot.pop('id')
         bots.append(_bot)
@@ -351,19 +366,7 @@ def communicate_bulk_campaign_update_with(bulkcampaign):
 
     worker_url = f"{bulkcampaign.servers.public_ip}"
     worker_tasks_url=worker_url+'crawl/api/tasks/'
-    resources_url=worker_url+'crawl/api/tasks/'
+    resources_url=worker_url+'crawl/api/resources/'
     print("WORKER_URL: ", worker_tasks_url)   
     
-    r.post(resources_url,data=json.dumps({'resources':[
-                            {'type':'device','data':devices,'method':'create'},
-                            {'type':'bot','data':bots
-                             ,'method':'create'},
-                            
-                                                
-                                                
-                                                
-                                                ]}))
-                                            
-    r.post(worker_tasks_url,data=json.dumps(tasks))
-    import datetime as dt
-    print('sent request to worker at'+str(dt.datetime.now()))
+    

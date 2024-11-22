@@ -96,7 +96,7 @@ WSGI_APPLICATION = 'vividmind.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/3.2/ref/settings/#databases
-''' 
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
@@ -108,13 +108,7 @@ DATABASES = {
         #'ATOMIC_REQUESTS': True,
     }
 }
-'''
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
+
 
 
 # Password validation
@@ -196,9 +190,9 @@ else:
     STATICFILES_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
     STATIC_URL = "https://%s/%s/" % (AWS_S3_CUSTOM_DOMAIN, AWS_LOCATION)
     DEFAULT_FILE_STORAGE = 'sessionbot.storage_backends.PublicMediaStorage'
-
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 CORS_ALLOWED_ORIGINS = [
-    "http://127.0.0.1:8000",
+    "https://0cda-2400-adc5-491-1500-d2f-8688-8e28-cd23.ngrok-free.app",
     "http://localhost",
     
 ]

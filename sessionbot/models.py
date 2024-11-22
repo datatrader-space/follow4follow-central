@@ -731,6 +731,8 @@ class ScrapeTask(models.Model):
     childbots=models.ManyToManyField(ChildBot,related_name='scrape_task')
     localstore=models.BooleanField(default=False)
     threading=models.BooleanField(default=False)
+    max_threads=models.IntegerField(default=5)
+    max_requests_per_day=models.IntegerField(default=100)
 
     def __str__(self):
         return self.name
@@ -1352,7 +1354,7 @@ class BulkCampaign(models.Model):
     childbots=models.ManyToManyField(ChildBot,related_name='campaign')
     devices=models.ManyToManyField(Device,blank=True)
     scrape_tasks=models.ManyToManyField(ScrapeTask,blank=True,related_name='campaign')
-    proxies=models.ManyToManyField(Proxy,blank=False,related_name='proxies')
+    proxies=models.ManyToManyField(Proxy,related_name='proxies',null=True,blank=True)
     #localstore=models.BooleanField(default=False)
     messaging=models.ManyToManyField(CampaignTextContent)
     #demographic=models.ManyToManyField(DemoGraphic)
@@ -1645,11 +1647,13 @@ class Task(models.Model):
     condition=models.CharField(blank=True,null=True,max_length=500) 
     profile=models.TextField(blank=True,
                           null=True)
+    alloted_bots=models.TextField(blank=True,
+                          null=True)
     device=models.TextField(blank=True,
                           null=True)
     targets=models.TextField(blank=True,null=True)
     add_data=models.JSONField(blank=True,null=True)
-   
+    server=models.ForeignKey(Server,blank=True,null=True,on_delete=models.SET_NULL)
     repeat=models.BooleanField(default=False)
     repeat_duration=models.CharField(max_length=20,blank=True,null=True)
     status=models.CharField(max_length=100,default='pending',choices=(('pending','pending'),('running','running'),('failed','failed'),('completed','completed')))
@@ -1657,7 +1661,8 @@ class Task(models.Model):
     report=models.BooleanField(default=False)
     retries_count=models.IntegerField(default=0)
     paused=models.BooleanField(default=False)
-    
+    delete=models.BooleanField(default=False)
+    registered=models.BooleanField(default=False)
     def save(self, *args, **kwargs):
         if not self.uuid:
             self.uuid = uuid.uuid4()
@@ -1671,36 +1676,61 @@ class Task(models.Model):
     
     versions=models.JSONField(default=dict)
     def __str__(self):
-        return str(self.username)
+        return str(self.id)
 
         return self.name
 
 
-from django.db.models.signals import post_save,m2m_changed  # Signal for post-save operations
+from django.db.models.signals import post_save,m2m_changed ,post_delete # Signal for post-save operations
 from django.dispatch import receiver
 
 
 
         
 #m2m_changed.connect(post_save_handler, sender=BulkCampaign.childbots.through)    
+s={
+    'type': 'dict', # or 'object'
+    'keys': { # or 'properties'
+        'country_slug': {
+            'type': 'string'
+        },
+        'city_id': {
+            'type': 'string'
+        },
+        
+    },
+    'required': ['country_slug','city_id']
+}
 class Todo(models.Model):
     name = models.CharField(max_length=255)
     #os=models.CharField(choices=(('android','android'),('browser','browser')))
     caption = models.TextField(blank=True)
-    location = models.CharField(max_length=2550, blank=True)
+    
+    target_location=JSONField(schema=s,
+            #choices=ACTIVITY_CHOICES,
+            #max_length=1000,
+            blank=True,
+            null=True
+           
+        )
     music = models.CharField(max_length=2550, blank=True)  # Store music URL  
     file = models.FileField(upload_to='media/todos/')
-    bots=models.ManyToManyField(ChildBot)
+    google_drive_root_folder_name=models.CharField(blank=True,null=True,max_length=500)
+    repeat=models.BooleanField(default=False)
+    repeat_after=models.IntegerField(help_text='Enter the number of hours to repeat the task after',blank=True,null=True)
+    childbots=models.ManyToManyField(ChildBot)
     def __str__(self):
         return self.name
 
-@receiver(post_save,sender=Todo)
-def post_save_handler(sender, instance, created, **kwargs):
-    print('haey')
-    if not created:  # Check if object is newly created
-        from sessionbot.worker_comm_utils import communicate_todo_with_worker
-        communicate_todo_with_worker(instance)
-        # Pass relevant data to your utility function
-        print(instance)
+class Logs(models.Model):
+    timestamp=models.DateTimeField(default=datetime.now())
+    message=models.TextField()
+    label=models.CharField(max_length=5000)
+    end_point=models.CharField(max_length=500)
+    identifier=models.IntegerField(blank=True,null=True)
+
+    def __str__(self):
+        return self.message
+
 
 

@@ -1,10 +1,58 @@
 from celery import chain, shared_task
-from requests import (ConnectionError,  # pylint: disable=redefined-builtin
-                      Timeout)
-@shared_task(autoretry_for=(ConnectionError, Timeout),
-             retry_backoff=5,
-             retry_kwargs={'max_retries': 5}
-             )
+from sessionbot.models import Task,ChildBot
+
+@shared_task()
+def communicate_tasks_with_worker():
+    import json
+    import requests as r
+    from django.forms import model_to_dict
+    unregistered_task=Task.objects.all().filter(registered=False)
+    _={}
+    for task in unregistered_task:
+        
+   
+        if task.server.public_ip in _.keys():
+            pass
+        else:
+            _.update({task.server.public_ip:{'tasks':[],'resources':{'devices':[],'bots':[]}}})
+    
+        active_dict=_[task.server.public_ip]
+        _task=model_to_dict(task)
+        if task.dependent_on:        
+            _task.update({'dependent_on':task.dependent_on.uuid})
+        active_dict['tasks'].append(_task)
+        
+      
+        import sessionbot.handlers.bots as bot
+        import sessionbot.handlers.device as device
+      
+        if task.profile:
+            _bot=bot.formatify_for_server(task.profile)      
+            active_dict['resources']['bots'].append( {'type':'bot','data':_bot
+                                ,'method':'create'})  
+        elif task.alloted_bots:
+            for username in task.alloted_bots.split(','):
+                _bot=bot.formatify_for_server(username)      
+                active_dict['resources']['bots'].append( {'type':'bot','data':_bot
+                                    ,'method':'create'}) 
+        if _bot['device']:
+            _device=device.formatify_for_worker(_bot['device'])
+
+            active_dict['resources']['devices'].append( {'type':'device','data':_device,'method':'create'})
+        
+      
+    print(_)
+    import time
+    for key, value in _.items():
+        
+        resources_url=key+'crawl/api/resources/'
+        worker_tasks_url=key+'crawl/api/tasks/'
+        resp=r.post(resources_url,data=json.dumps({'resources':value['resources']}))
+        resp=r.post(worker_tasks_url,data=json.dumps(value['tasks']))
+        print(resp.text)
+    time.sleep(300)
+    import datetime as dt
+    print('sent request to worker at'+str(dt.datetime.now()))
 def send_comand_to_instance(instance_id, data, model_config=None):
     """Send a command to an Instance.
 

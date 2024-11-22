@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import todo_view, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
+from .views import todo,logs, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
 from django.urls import path, include
 from sessionbot.models import ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
 from rest_framework import routers, serializers, viewsets
@@ -167,7 +167,8 @@ urlpatterns = [
     path("api/devices/delete/<str:serial_number>/", deleteDeviceResource, name='deleteDeviceResource'),
     path('api/proxy/delete/<str:proxy_url>/', deleteProxyResource, name='delete_proxy_resource'),
     path('api/attendance/attendance-task/', attendance_task, name='attendance_task'),
-    path('api/scrape-task/create/', scrape_task, name='scrape_task'),
-    path('api/todo/create/', todo_view, name='todo_view'),
+    path('api/scrapetask/', scrape_task, name='scrape_task'),
+    path('api/todo/', todo, name='todo_view'),
+    path('api/logs/',logs,name='logs')
 
 ]
