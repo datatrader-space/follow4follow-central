@@ -27,14 +27,21 @@ def communicate_tasks_with_worker():
         import sessionbot.handlers.device as device
       
         if task.profile:
-            _bot=bot.formatify_for_server(task.profile)      
-            active_dict['resources']['bots'].append( {'type':'bot','data':_bot
-                                ,'method':'create'})  
+            _bot=bot.formatify_for_server(task.profile)   
+            if _bot:   
+                active_dict['resources']['bots'].append( {'type':'bot','data':_bot
+                                   ,'method':'create'})  
+            else:
+                continue
         elif task.alloted_bots:
             for username in task.alloted_bots.split(','):
-                _bot=bot.formatify_for_server(username)      
-                active_dict['resources']['bots'].append( {'type':'bot','data':_bot
-                                    ,'method':'create'}) 
+                _bot=bot.formatify_for_server(username)    
+                if _bot:
+
+                    active_dict['resources']['bots'].append( {'type':'bot','data':_bot
+                                        ,'method':'create'}) 
+                else:
+                    continue
         if _bot['device']:
             _device=device.formatify_for_worker(_bot['device'])
 
