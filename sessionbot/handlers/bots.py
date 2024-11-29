@@ -1,10 +1,13 @@
 def formatify_for_server(bot):
         from sessionbot.models import ChildBot
         from django.forms import model_to_dict
+        print(bot)
         if type(bot)==str:
                 c=ChildBot.objects.all().filter(username=bot)
                 if c:
                     bot=c[0]
+                else:
+                       return False
     
 
         _bot = model_to_dict(bot)

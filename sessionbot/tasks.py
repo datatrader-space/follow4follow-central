@@ -50,7 +50,7 @@ def communicate_tasks_with_worker():
         resp=r.post(resources_url,data=json.dumps({'resources':value['resources']}))
         resp=r.post(worker_tasks_url,data=json.dumps(value['tasks']))
         print(resp.text)
-    time.sleep(300)
+
     import datetime as dt
     print('sent request to worker at'+str(dt.datetime.now()))
 def send_comand_to_instance(instance_id, data, model_config=None):
