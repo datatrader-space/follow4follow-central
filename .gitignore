@@ -8,6 +8,7 @@ services/facebook
 venv/
 deep_stuff/workflows
 deep_stuff/payloads
+sessionbot/migrations
 db.sqlite3
 resources/
 resources/

@@ -29,6 +29,98 @@ def createResource(request: HttpRequest) -> JsonResponse:
         response = {'status': 'bad_request_type'}
     
     return JsonResponse(response)
+@csrf_exempt
+def audience(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)      
+        method=data.get('method')
+        print(data)
+        if method =='get':
+            
+            return JsonResponse(results,safe=False)
+        elif method=='create':
+            print(data)
+            for row in data.get('data'):
+                for id in row.get('scrapetask',[]):
+                    s=ScrapeTask.objects.all().filter(id=id)
+                    if len(s)>0:
+                        s=s[0]
+                        if 'followers' in s.input:
+                            data_point='user_followers'
+                        tasks_for_scrape_task=Task.objects.all().filter(ref_id=s.id)
+                        fields_to_compare=[]
+                        check_for_presence_ofs=[]
+                        for field_to_compare in row.get('fields_to_compare'):
+                                fields_to_compare.append(field_to_compare)
+                        for check_for_presence_of in row.get('check_for_presence_of'):
+                            check_for_presence_ofs.append(check_for_presence_of)
+                        print(fields_to_compare)
+                        print(check_for_presence_ofs)
+                        for task in tasks_for_scrape_task:
+                        
+                            
+                            print(task)
+                            task={'service':'cleaner',
+                            'end_point':row.get('service'),
+                            'data_point':'clean_user_followers',
+                            'add_data':{'data_source':[{'type':'task','identifier':task.uuid},
+                                                        #{'type':'storage_block','identifier':'dancingtheearth','service':'instagram'},
+                                                        #{'type':'data_point','service':'instagram','identifier':'user_followers','end_point':'user',
+                                                        # 'input':'dancingtheearth'},
+                                                        #{'type':'google_sheet','link':'somelink'}                         
+                                                        ],
+                           
+                                'fields_to_compare':[{'key':'is_private','value':False},
+                                                            {'key':'rest_id','value':int}
+                                                            
+                                                    ],
+                                'check_for_presence_of':[
+                                                {
+                                                    "key":"profile_picture",
+                                                    "value":"44884218_345707102882519",
+
+                                                
+                                                }],
+                                'save_to_googlesheet':False#'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0'
+                                
+                                                            
+
+                            },
+                            'uuid':123123
+                            }
+
+                        
+                        print(data_point)
+
+        elif method == 'update':            
+                pass
+                l=Logs(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
+                l.save()
+           
+                return JsonResponse(status=200,data={'status':'success'})
+
+
+        elif method == 'delete':
+            ids = data.get('data',{}).get('ids',[])
+            for id in ids:
+              
+                    obj=Todo.objects.filter(id=id)
+                    if obj:
+                        obj=obj[0]
+                        todo.handle_todo_deletion(obj)
+        elif method =='change_state':
+            tasks = data.get('data',{})
+            for task in tasks:
+                for key, value in task.items():
+                    obj=Todo.objects.filter(id=key)
+                    if obj:
+                        obj=obj[0]
+                        todo.handle_state_change(obj)
+           
+
+        return JsonResponse({'status': 'success'}, status=200)
+
+    return HttpResponse('Method not allowed', status=405)
 
 @csrf_exempt
 def createDeviceResource(request: HttpRequest) -> JsonResponse:

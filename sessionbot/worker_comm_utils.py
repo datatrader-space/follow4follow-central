@@ -121,39 +121,32 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
             #print('bulk task')
             activity_to_perform=inp['activity_to_perform'].split(',')
             #print(activity_to_perform)
+            task['add_data']={}
             for act in activity_to_perform:
-                
+                print(act)
                 if act=='follow':
                     t=task.copy()
                     t['data_point']='search_user_and_interact'
                     
                     t['targets']=inp['target_profile']
                     t['os']=inp['os']
-                    t['activity_to_perform']='follow'
+                    t['add_data'].update({'follow_target':True,'bulk_task':True})
+              
                     task=t
                 elif act=='like':
                     t=task.copy()
-                    t['data_point']='search_post_and_interact'
+                    t['data_point']='search_user_and_interact'
                     
                     t['targets']=inp['target_profile']
                     t['os']=inp['os']
-                    t['activity_to_perform']='like'
+                    t['add_data'].update({'like_latest_post':True,'bulk_task':True})
                     task=t
-                elif act=='dm':
-                    t=task.copy()
-                    t['data_point']='send_dm'
-                    
-                    t['targets']=inp['target_profile']
-                    t['os']=inp['os']
-                    t['activity_to_perform']='like'
-                    task=t
+               
                 elif act=='share_post_as_story':
                     t=task.copy()
-                    t['data_point']='share_post_as_story'
-                
-                    t['targets']=inp['target_profile']
+                    t['data_point']='search_user_and_interact'
                     t['os']=inp['os']
-                    t['activity_to_perform']='like'
+                    t['add_data'].update({'share_latest_post_as_story':True,'bulk_task':True})
                     task=t
 
         

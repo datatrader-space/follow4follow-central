@@ -330,7 +330,7 @@ class ChildBot(models.Model):
                                 null=False
                                 )
     phone_number=models.IntegerField(blank=True,null=True, default=00000000000)
-
+    proxy_url=models.CharField(max_length=600,blank=True,null=True)
     email_address = models.EmailField(max_length=254,
                                       blank=True,
                                       null=True,

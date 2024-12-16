@@ -104,18 +104,12 @@ def profile(**kwargs):
 
     password = kwargs.get("password")
     if not password:
-        log_message(f"Password is missing for {username}.")
-        return {
-            "response": "failed",
-            "message": f"ProfileCreationFailed for {username} Password Missing",
-            "object": None,
-            "label": "PasswordNotFound",
-            "logs": logs,
-        }
+        log_message(f"Password is missing for {username}. Force Creating Profile")
+        
 
     email_address = kwargs.get("email_address")
     phone_number=kwargs.get("phone_number")
-
+    proxy_url=kwargs.get('proxy_url',None)
     # Handle optional logged_in_on_servers field
     logged_in_on_servers = kwargs.get("logged_in_on_servers")
     server = None
@@ -159,6 +153,7 @@ def profile(**kwargs):
             c.logged_in_on_servers = server
         if device:
             c.device = device
+        c.proxy_url=proxy_url
         c.save()
 
         _c = model_to_dict(c)
@@ -185,6 +180,7 @@ def profile(**kwargs):
             c.logged_in_on_servers = server
         if device:
             c.device = device
+        c.proxy_url=proxy_url
         c.save()
 
         _c = model_to_dict(c)
