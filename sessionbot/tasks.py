@@ -6,7 +6,11 @@ def communicate_tasks_with_worker():
     import json
     import requests as r
     from django.forms import model_to_dict
-    unregistered_task=Task.objects.all().filter(registered=False)
+    unregistered_tasks=Task.objects.all().filter(registered=False)
+    delete_tasks=Task.objects.all().filter(delete=True)
+    print(delete_tasks)
+    unregistered_task=unregistered_tasks.union(delete_tasks)
+    print(unregistered_task)
     _={}
     for task in unregistered_task:
         
@@ -15,11 +19,15 @@ def communicate_tasks_with_worker():
             pass
         else:
             _.update({task.server.public_ip:{'tasks':[],'resources':{'devices':[],'bots':[]}}})
-    
+        if task.delete:
+            method='delete'
+        else:
+            method='create'
         active_dict=_[task.server.public_ip]
         _task=model_to_dict(task)
         if task.dependent_on:        
             _task.update({'dependent_on':task.dependent_on.uuid})
+        _task.update({'method':method})
         active_dict['tasks'].append(_task)
         
       
@@ -49,6 +57,7 @@ def communicate_tasks_with_worker():
         
       
     print(_)
+    print(active_dict['tasks'])
     import time
     for key, value in _.items():
         
@@ -56,7 +65,11 @@ def communicate_tasks_with_worker():
         worker_tasks_url=key+'crawl/api/tasks/'
         resp=r.post(resources_url,data=json.dumps({'resources':value['resources']}))
         resp=r.post(worker_tasks_url,data=json.dumps(value['tasks']))
-        print(resp.text)
+        print(resp)
+        if resp.status_code==200:
+            unregistered_tasks.update(registered=True)
+            delete_tasks.delete()
+            
 
     import datetime as dt
     print('sent request to worker at'+str(dt.datetime.now()))
