@@ -2,7 +2,7 @@ from django.urls import path
 
 from .views import todo,logs,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
 from django.urls import path, include
-from sessionbot.models import ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
+from sessionbot.models import Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
 from rest_framework import routers, serializers, viewsets
 
 # Serializers define the API representation.
@@ -124,7 +124,14 @@ class ScrapeTaskSerializer(serializers.HyperlinkedModelSerializer):
     class Meta:
         model=ScrapeTask
         exclude=['customer']
-        
+class AudienceSerializer(serializers.HyperlinkedModelSerializer):    
+    id = serializers.IntegerField(read_only=True)
+    campaigns = BulkCampaignSerializer(many=True, read_only=True)
+    class Meta:
+        model=Audience
+class AudienceViewSet(viewsets.ModelViewSet):    
+    queryset=Audience.objects.all()
+    serializer_class=AudienceSerializer 
 class ScrapeTaskViewSet(viewsets.ModelViewSet):
     queryset=ScrapeTask.objects.all()
     serializer_class=ScrapeTaskSerializer  
@@ -155,6 +162,7 @@ router.register(r'sharing',SharingViewSet)
 router.register(r'scrapetask',ScrapeTaskViewSet)
 router.register(r'todo',TodoViewSet)
 router.register(r'bulkcampaign', BulkCampaignViewSet)
+router.register(r'audience',AudienceViewSet)
 router.register(r'tasks', TaskViewSet)
 
 urlpatterns = [

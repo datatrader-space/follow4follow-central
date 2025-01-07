@@ -32,7 +32,11 @@ SERVICES: Tuple[Tuple[str]] = (
     ('instagram', 'Instagram'),
     ('attendance','attendance'),
     ('twitter','twitter'),
-    ('tiktok','tiktok')
+    ('tiktok','tiktok'),
+    ('cleaner','cleaner'),
+    ('data_enricher','Data Enricher'),
+    ('openai','OpenAI'),
+    ('audience','Audience')
 )
 
 OPERATIONS: Dict[str, Tuple[Tuple[str]]] = {
@@ -1285,7 +1289,16 @@ MONITOR_SCHEMA=   {
 }
 
 from django_jsonform.models.fields import JSONField
+class Audience(models.Model):
+    service=models.CharField(choices=SERVICES,blank=False,null=False,default='instagram',max_length=500)
+    name=models.CharField(blank=False,null=False,unique=True,max_length=500)
+    scrape_tasks=models.ManyToManyField(ScrapeTask,blank=False,null=False)
+    cleaning_configuration=models.JSONField(default={},blank=False,null=False)
+    enrichment_configuration=models.JSONField(default={},blank=False,null=False)
+    storage_configuration=models.JSONField(default={},blank=False,null=False)
 
+    def __str__(self):
+        return self.name
 class BulkCampaign(models.Model):
     """_summary_
 
@@ -1353,6 +1366,7 @@ class BulkCampaign(models.Model):
     os=models.CharField(choices=(('android','Android'),('browser','Browser')),max_length=5000,blank=False,null=False,default='android')
     childbots=models.ManyToManyField(ChildBot,related_name='campaign')
     devices=models.ManyToManyField(Device,blank=True)
+    audience=models.ForeignKey(Audience,blank=True,null=True,on_delete=models.SET_NULL)
     scrape_tasks=models.ManyToManyField(ScrapeTask,blank=True,related_name='campaign')
     proxies=models.ManyToManyField(Proxy,related_name='proxies',null=True,blank=True)
     #localstore=models.BooleanField(default=False)
@@ -1684,8 +1698,14 @@ class Task(models.Model):
 from django.db.models.signals import post_save,m2m_changed ,post_delete # Signal for post-save operations
 from django.dispatch import receiver
 
-
-
+@receiver(post_delete, sender=BulkCampaign)
+def handle_mymodel_delete(sender, instance, **kwargs):
+    Task.objects.all().filter(end_point='interact').filter(ref_id=instance.id).update(delete=True)
+    Task.objects.all().filter(data_point='condition_handler').filter(ref_id=instance.id).update(delete=True)
+@receiver(post_delete, sender=ChildBot)
+def handle_mymodel_delete(sender, instance, **kwargs):
+    Task.objects.all().filter(profile=instance.username).update(delete=True)
+    
         
 #m2m_changed.connect(post_save_handler, sender=BulkCampaign.childbots.through)    
 s={
@@ -1702,6 +1722,7 @@ s={
     'required': ['country_slug','city_id']
 }
 class Todo(models.Model):
+    service=models.CharField(choices=SERVICES,blank=False,null=False,default='instagram',max_length=500)
     name = models.CharField(max_length=255)
     #os=models.CharField(choices=(('android','android'),('browser','browser')))
     caption = models.TextField(blank=True)

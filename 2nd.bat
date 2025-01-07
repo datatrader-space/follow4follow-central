@@ -18,5 +18,6 @@ START "" python manage.py runserver 0.0.0.0:80
 START "" celery --app vividmind beat --loglevel=INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
 START "" celery --app=vividmind worker --pool=eventlet --loglevel=INFO
 START "" ngrok http 80
-cd Redis 
+C:
+cd Redis
 redis-server.exe

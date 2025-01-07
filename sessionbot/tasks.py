@@ -33,7 +33,7 @@ def communicate_tasks_with_worker():
       
         import sessionbot.handlers.bots as bot
         import sessionbot.handlers.device as device
-      
+        _bot=None
         if task.profile:
             _bot=bot.formatify_for_server(task.profile)   
             if _bot:   
@@ -50,14 +50,14 @@ def communicate_tasks_with_worker():
                                         ,'method':'create'}) 
                 else:
                     continue
-        if _bot['device']:
-            _device=device.formatify_for_worker(_bot['device'])
+        if _bot:
+            if _bot['device']:
+                _device=device.formatify_for_worker(_bot['device'])
 
-            active_dict['resources']['devices'].append( {'type':'device','data':_device,'method':'create'})
+                active_dict['resources']['devices'].append( {'type':'device','data':_device,'method':'create'})
         
       
-    print(_)
-    print(active_dict['tasks'])
+  
     import time
     for key, value in _.items():
         

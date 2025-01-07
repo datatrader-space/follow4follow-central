@@ -3,7 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets
-from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Logs
+from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Logs,Audience
 import json
 import requests
 import logging
@@ -32,65 +32,185 @@ def createResource(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 def audience(request):
     if request.method == 'POST':
+        from django.forms import model_to_dict
         data = json.loads(request.body)      
         method=data.get('method')
         print(data)
         if method =='get':
-            
+            from sessionbot.models import Audience
+            results=[]
+            data=data.get('data')
+            if data.get('ids'):
+                for _id in data.get('ids',[]):
+                    scrape_task_ids=[]
+                    obj=Audience.objects.all().filter(id=_id)
+                    if obj:
+                        obj=obj[0]
+                        res=model_to_dict(obj)
+                        res.pop('scrape_tasks')
+                        for s in obj.scrape_tasks.all():
+                            scrape_task_ids.append(s.id)
+                        res.update({'scrape_task_ids':scrape_task_ids})
+                        vals=[]
+                        
+                        
+                    else:
+                        res=False
+                    results.append({_id:res})
+            else:
+                
+                vals=[]
+                scrape_task_ids=[]
+                for obj in Audience.objects.all():
+                    res=model_to_dict(obj)
+                    res.pop('scrape_tasks')
+                    for s in obj.scrape_tasks.all():
+                        scrape_task_ids.append({s.id:s.name})
+                    res.update({'scrape_tasks':scrape_task_ids})
+                    results.append({obj.id:res})
+                    
+            print(results)
             return JsonResponse(results,safe=False)
+
         elif method=='create':
+            from sessionbot.models import Audience
             print(data)
             for row in data.get('data'):
+                name=row.get('name')
+                scrape_tasks=[]
+                print(name)
+                a=Audience.objects.all().filter(name=name)
+                if len(a)>0:
+                    a=a[0]
+                    l=Logs(message='Failed to create Audience. An Audience with name '+str(name)+' already exists',end_point='audience')
+                    l.save()
+                else:
+                    a=Audience()
                 for id in row.get('scrapetask',[]):
                     s=ScrapeTask.objects.all().filter(id=id)
+                    
                     if len(s)>0:
                         s=s[0]
+                        scrape_tasks.append(s)
                         if 'followers' in s.input:
                             data_point='user_followers'
-                        tasks_for_scrape_task=Task.objects.all().filter(ref_id=s.id)
+                            end_point='user'
+                        tasks_for_scrape_task=Task.objects.all().filter(ref_id=s.id).filter(end_point=end_point).filter(data_point=data_point)
                         fields_to_compare=[]
                         check_for_presence_ofs=[]
                         for field_to_compare in row.get('fields_to_compare'):
-                                fields_to_compare.append(field_to_compare)
+                                print(field_to_compare.get('value'))
+                                if field_to_compare.get('type')=='str' and not field_to_compare.get('value'):
+                                    _={'key':field_to_compare.get('key'),'value':'str'}
+                                elif field_to_compare.get('type')=='int' and field_to_compare.get('value')==None:
+                                    _={'key':field_to_compare.get('key'),'value':'int'}
+                                elif field_to_compare.get('type')=='boolean':
+                                    _={'key':field_to_compare.get('key'),'value':field_to_compare.get('value')}
+                                else:
+                                    continue
+                                fields_to_compare.append(_)
+                        
                         for check_for_presence_of in row.get('check_for_presence_of'):
-                            check_for_presence_ofs.append(check_for_presence_of)
+                            _={'key':check_for_presence_of.get('key'),'value':check_for_presence_of.get('value')}
+                            check_for_presence_ofs.append(_)
                         print(fields_to_compare)
                         print(check_for_presence_ofs)
-                        for task in tasks_for_scrape_task:
-                        
-                            
-                            print(task)
-                            task={'service':'cleaner',
-                            'end_point':row.get('service'),
-                            'data_point':'clean_user_followers',
-                            'add_data':{'data_source':[{'type':'task','identifier':task.uuid},
-                                                        #{'type':'storage_block','identifier':'dancingtheearth','service':'instagram'},
-                                                        #{'type':'data_point','service':'instagram','identifier':'user_followers','end_point':'user',
-                                                        # 'input':'dancingtheearth'},
-                                                        #{'type':'google_sheet','link':'somelink'}                         
-                                                        ],
-                           
-                                'fields_to_compare':[{'key':'is_private','value':False},
-                                                            {'key':'rest_id','value':int}
-                                                            
-                                                    ],
-                                'check_for_presence_of':[
-                                                {
-                                                    "key":"profile_picture",
-                                                    "value":"44884218_345707102882519",
+                    a.cleaning_configuration={'fields_to_compare':row.get('fields_to_compare'),'check_for_presence_of':row.get('check_for_presence_of')}
+                    data_enrichments=row.get('data_enrichments')
+                    data_enrichments.update({'ai_Service':row.get('ai_service')})
+                    a.enrichment_configuration=data_enrichments
 
-                                                
-                                                }],
-                                'save_to_googlesheet':False#'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0'
-                                
+                    if row.get('save_to_googlesheet'):
+                        storage_configuration={'save_to_googlesheet':True,'google_sheet_url':row.get('google_sheet_url'),'local':True}
+                    else:
+                        storage_configuration={'local':True,'save_to_googlesheet':False}
+                    a.storage_configuration=storage_configuration
+                    a.name=name
+                    a.service=row.get('service')
+                    a.save()
+                    a.scrape_tasks.set(scrape_tasks)
+                    for task in tasks_for_scrape_task:
+                        
+                        _={'service':'cleaner',
+                        'ref_id':a.id,
+                        'end_point':row.get('service'),
+                        'data_point':'clean_user_followers',
+                        'add_data':{'data_source':[{'type':'task','identifier':task.uuid},
+                                                    #{'type':'storage_block','identifier':'dancingtheearth','service':'instagram'},
+                                                    #{'type':'data_point','service':'instagram','identifier':'user_followers','end_point':'user',
+                                                    # 'input':'dancingtheearth'},
+                                                    #{'type':'google_sheet','link':'somelink'}                         
+                                                    ],
+                        
+                            'fields_to_compare':fields_to_compare,
+                            'check_for_presence_of':check_for_presence_ofs,
+                            'save_to_googlesheet':False#'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0'
+                            
+                                                        
+
+                        },
+                        'uuid':str(uuid.uuid1())
+                        }
+
+                        t=Task(**_)
+                        t.server=task.server
+                        t.dependent_on=task
+                        t.save()
+
+                        if a.enrichment_configuration.get('nationalityEnrichment'):
+                            _={'service':'data_enricher',
+                                                'ref_id':a.id,
+                                                'end_point':"Enrich",
+                                                'data_point':'enrich',
+                                                'add_data':{'data_source':[{'type':'task','identifier':t.uuid}],
+                                                            'service':'openai',
+                                                            'columns':['name'],
+                                                            'prompt': "For the name {name}, provide the following details:\n" \
+                                            "1. Type (e.g., Person, Brand, etc.)\n" \
+                                            "2. Gender (if it's a person's name)\n" \
+                                            "3. Country of origin or association\n\n\
+                                            and follow this strictly."\
+                                            "Try to provide the details based on their names and also don't focus on any special characters or icons in the name"\
+                                            "Try to provide the details regarding country and gender while focusing on the name and not focusing on icons in the name."\
+                                            "If you don't have any information, just keep the fields empty, please.",
+                                            'output_column_names':['country','gender','type'],
+
+                                                    'save_to_googlesheet':True,
+                                                    'spreadsheet_url':'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0',
+                                                    'worksheet_name':'test'
+                                                                                
+
+                                                },
+                                                'uuid':str(uuid.uuid1())
+                                            }
+                            _t=Task(**_)
+                            _t.server=t.server
+                            _t.dependent_on=t
+                            _t.save()
+                            t=_t
+                        _={'service':'audience',
+                            'ref_id':a.id,
+                            'end_point':"Save",
+                            'data_point':'save',
+                            'add_data':{'data_source':[{'type':'task','identifier':t.uuid}],
+                                        
+
+                                'save_to_googlesheet':True,
+                                'spreadsheet_url':'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0',
+                                'worksheet_name':'audience'
                                                             
 
                             },
-                            'uuid':123123
-                            }
+                            'uuid':str(uuid.uuid1())
+                                            }
+                        _t=Task(**_)
+                        _t.server=t.server
+                        _t.dependent_on=t
+                        _t.save()
+                        t=_t
 
-                        
-                        print(data_point)
+
+                    
 
         elif method == 'update':            
                 pass
@@ -98,8 +218,30 @@ def audience(request):
                 l.save()
            
                 return JsonResponse(status=200,data={'status':'success'})
+        elif method=='visualize':
+            data=data.get('data')
+            audience_id=data.get('ids')[0]
+            session_id=data.get('session_id')
+            from sessionbot.saver import Saver
+            s=Saver()
+            exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
+            resp=s.retrieve_audience_outputs(audience_id,exclude_blocks=exclude_blocks,keys=True)
+            print(audience_id)
+            for key,value in resp.items():
+                print('Request recieve')
+                s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)
+                return JsonResponse({'status': 'success','data':value}, status=200) 
+            return JsonResponse({'status': 'success','data':[]}, status=200)                              
+                                    
 
-
+        elif method=='save':
+            from sessionbot.saver import Saver
+            s=Saver()
+            audience_data=data.get('data')
+            audience_id=data.get('audience_id')
+            
+            s.save_audience_outputs(audience_id,audience_data)
+            return JsonResponse({'status': 'success'}, status=200)
         elif method == 'delete':
             ids = data.get('data',{}).get('ids',[])
             for id in ids:
@@ -117,8 +259,8 @@ def audience(request):
                         obj=obj[0]
                         todo.handle_state_change(obj)
            
-
-        return JsonResponse({'status': 'success'}, status=200)
+        else:
+            return JsonResponse({'status': 'failed'}, status=400)
 
     return HttpResponse('Method not allowed', status=405)
 
@@ -207,7 +349,10 @@ def bulk_campaign(request):
                 messaging = campaign_data.get('messaging', None)
                 sharing = campaign_data.get('sharing', None)
                 monitor=campaign_data.get('monitor',False)
-                #print(campaign_data)
+                audience=campaign_data.get('audiences',[])
+                if audience:
+                    campaign_data.update({'audience_id':audience[0]})
+                campaign_data.pop('audiences')
 
                 campaign_data.update({'servers_id': servers_id})
                 campaign_data.pop('servers', None)
@@ -250,7 +395,9 @@ def bulk_campaign(request):
 
                 elif method == 'delete':
                     try:
+                        
                         campaign_instance = BulkCampaign.objects.get(id=campaign_id)
+                        Task.objects.all().filter(end_point='interact').filter(ref_id=campaign_instance.id).update(delete=True)
                         campaign_instance.delete()
                     except BulkCampaign.DoesNotExist:
                         return JsonResponse({'error': 'Campaign not found'}, status=404)
@@ -269,7 +416,9 @@ def scrape_task(request):
         method=data.get('method')
 
         if method =='get':
+            from django.forms import model_to_dict
             results=[]
+            data=data.get('data')
             if data.get('ids'):
                 for _id in data.get('ids',[]):
                     obj=ScrapeTask.objects.all().filter(id=_id)
@@ -277,7 +426,7 @@ def scrape_task(request):
                         obj=obj[0]
                         res=model_to_dict(obj)
                         vals=[]
-                        for input in res.input.split(','):
+                        for input in obj.input.split(','):
                             if 'followers' in input:
                                 scrape_type='by_username'
                             elif 'location' in input:
@@ -290,14 +439,14 @@ def scrape_task(request):
                             res.pop('input')
                             res.pop('customer')
                         res.pop('childbots')
-                        res.update({'childbot_ids':list(obj.childbots.values_list('id','name'))})
+                        res.update({'childbot_ids':list(obj.childbots.values_list('id','username'))})
                         res.update({'scrape_type':scrape_type,'scrape_value':','.join(vals)})
                         
                     else:
                         res=False
                     results.append({_id:res})
             else:
-                from django.forms import model_to_dict
+                
                 vals=[]
                 for obj in ScrapeTask.objects.all():
                     res=model_to_dict(obj)
@@ -407,7 +556,9 @@ def todo(request):
         method=data.get('method')
         print(data)
         if method =='get':
+            from django.forms import model_to_dict
             results=[]
+            data=data.get('data')
             if data.get('ids'):
                 for _id in data.get('ids',[]):
                     obj=Todo.objects.all().filter(id=_id)
@@ -424,7 +575,7 @@ def todo(request):
                     results.append({_id:res})
                     
             else:
-                from django.forms import model_to_dict
+                
                 vals=[]
                 for obj in Todo.objects.all():
                     res=model_to_dict(obj)
@@ -796,4 +947,3 @@ def logs(request):
         logs=Logs.objects.all().filter(end_point=data.get('end_point')).order_by('-timestamp').values()
         return JsonResponse(list(logs),safe=False)
     return HttpResponse('Method not allowed', status=405)
-    

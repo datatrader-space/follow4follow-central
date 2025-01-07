@@ -1,9 +1,10 @@
 from django.contrib import admin
-from sessionbot.models import Logs,TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings, Task,Todo
+from sessionbot.models import Audience,Logs,TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings, Task,Todo
 import json
 admin.site.register(EmailProvider)
 admin.site.register(TargetSettings)
 admin.site.register(Logs)
+admin.site.register(Audience)
 from django_admin_relation_links import AdminChangeLinksMixin
 
 from sessionbot.resource_utils import convert_bulk_campaign_to_workflow_for_vivide_mind_worker
