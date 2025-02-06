@@ -17,7 +17,7 @@ def create_resources_from_google_sheets(**kwargs):
     g = GoogleSheet()
     g.initialize_connection()
     print("i was initialized")
-    resource_types = ["email_providers", "profiles", "servers", "devices"]
+    resource_types = ["proxies", "bot", "servers", "devices"]
     print(kwargs)
     if kwargs.get("spreadsheet_url"):
         g.spreadsheet_url = kwargs.get("spreadsheet_url")
@@ -28,10 +28,15 @@ def create_resources_from_google_sheets(**kwargs):
 
     request_id = kwargs.get("request_id")
     response = []
-
+    if g.open_google_sheet():
+        print(g.spreadsheet)
+        from sessionbot.models import SyncedSheet
+        s=SyncedSheet(spreadsheet_name=g.spreadsheet.title,google_spreadsheet_url=g.spreadsheet_url)
+        s.save()
     for resource_type in resource_types:
         print(f"Processing resource type: {resource_type}")
         g.open_google_sheet().find_worksheet(resource_type).read_worksheet()
+       
         data = g.worksheet_data
         print(f"Data read from worksheet: {data}")
 
@@ -39,13 +44,13 @@ def create_resources_from_google_sheets(**kwargs):
             print(f"Processing row: {row}")
             kwargs.update({"row": row})
             resp = None
-            if resource_type == "profiles":
+            if resource_type == "bot":
                 if not row.get("service"):
-                    print("Service Not Found. Skipping Profile. Add report here.")
+                    print("Service Not Found. Skipping bot. Add report here.")
                     continue
 
-                resp = profile(**row)
-                resp.update({"resource_type": "profile"})
+                resp = bot(**row)
+                resp.update({"resource_type": "bot"})
                 resp.update({"request_id": request_id})
             elif resource_type == "email_providers":
                 resp = email_provider(**row)
@@ -73,19 +78,19 @@ def create_resources_from_google_sheets(**kwargs):
     return response
 
 
-def profile(**kwargs):
+def bot(**kwargs):
     logs = []
 
     def log_message(message):
         logs.append(message)
 
-    log_message(f"Entering profile with kwargs: {kwargs}")
+    log_message(f"Entering bot with kwargs: {kwargs}")
     username = kwargs.get("username")
     if not username:
         log_message("Username is missing.")
         return {
             "response": "failed",
-            "message": "ProfileCreationFailed Username Missing",
+            "message": "botCreationFailed Username Missing",
             "object": None,
             "label": "UserNameNotFound",
             "logs": logs,
@@ -96,7 +101,7 @@ def profile(**kwargs):
         log_message(f"Service is missing for {username}.")
         return {
             "response": "failed",
-            "message": f"ProfileCreationFailed for {username} Service Missing",
+            "message": f"botCreationFailed for {username} Service Missing",
             "object": None,
             "label": "ServiceNotFound",
             "logs": logs,
@@ -104,7 +109,7 @@ def profile(**kwargs):
 
     password = kwargs.get("password")
     if not password:
-        log_message(f"Password is missing for {username}. Force Creating Profile")
+        log_message(f"Password is missing for {username}. Force Creating bot")
         
 
     email_address = kwargs.get("email_address")
@@ -143,7 +148,7 @@ def profile(**kwargs):
 
     from sessionbot.models import ChildBot, EmailProvider
 
-    # Check if the profile already exists
+    # Check if the bot already exists
     c = ChildBot.objects.filter(service=service, username=username).first()
     if c:
         c.password = password
@@ -161,13 +166,13 @@ def profile(**kwargs):
         _c.pop("created_on")
         resp = {
             "response": "success",
-            "message": f"Profile Already Exists for {username} Duplicate",
+            "message": f"bot Already Exists for {username} Duplicate",
             "object": _c,
-            "label": "ProfileAlreadyExists",
+            "label": "botAlreadyExists",
         }
-        log_message(f"Profile already exists for {username}.")
+        log_message(f"bot already exists for {username}.")
     else:
-        log_message(f"Creating a new profile for {username}.")
+        log_message(f"Creating a new bot for {username}.")
         c = ChildBot(
             username=username,
             display_name=username,
@@ -200,7 +205,7 @@ def profile(**kwargs):
                 else:
                     resp = {
                         "response": "success",
-                        "message": f"Profile {username} Created without Email Provider",
+                        "message": f"bot {username} Created without Email Provider",
                         "object": _c,
                         "label": "EmailProviderNotExists",
                     }
@@ -208,7 +213,7 @@ def profile(**kwargs):
             else:
                 resp = {
                     "response": "success",
-                    "message": f"Profile {username} Created without Email Provider/Password",
+                    "message": f"bot {username} Created without Email Provider/Password",
                     "object": _c,
                     "label": "IncompleteEmailSettings",
                 }
@@ -220,27 +225,14 @@ def profile(**kwargs):
 
         resp = {
             "response": "success",
-            "message": f"Profile {username} Created Successfully",
+            "message": f"bot {username} Created Successfully",
             "object": _c,
-            "label": "NewProfileCreated",
+            "label": "NewbotCreated",
         }
-        log_message(f"New profile created for {username}.")
+        log_message(f"New bot created for {username}.")
 
     # Send the payload to the worker URL
-    try:
-        worker_payload = {
-            "username": username,
-            "service": service,
-            "password": password,
-            "email_address": email_address,
-        }
-        log_message(f"Sending payload to worker: {worker_payload}")
-        worker_url = f"{server.public_ip}crawl/childbots/" if server else "default_worker_url"
-        response = requests.post(worker_url, json=worker_payload)
-        response.raise_for_status()  # Raise exception if the request failed
-        log_message(f"Successfully sent payload to worker: {response.json()}")
-    except requests.exceptions.RequestException as e:
-        log_message(f"Error sending payload to worker: {str(e)}")
+
 
     resp["logs"] = logs
     return resp
@@ -361,6 +353,61 @@ def server(**kwargs):
     resp["logs"] = logs
     return resp
 
+
+
+def proxy(**kwargs):
+    from sessionbot.models import Proxy
+    logs = []
+
+    def log_message(message):
+        logs.append(message)
+
+    log_message(f"Entering proxy with kwargs: {kwargs}")
+
+    provider = kwargs.get("provider")
+    proxy_type = kwargs.get("type")  # Renamed for clarity
+    ip_address = kwargs.get("ip_address")
+
+    if not all([provider, proxy_type, ip_address]):
+        log_message('Mandatory keys "provider", "type", and "ip_address" missing for row')
+        return {
+            "status": "failed",
+            "message": 'Mandatory keys "provider", "type", and "ip_address" missing for row',
+            "object": None,
+            "label": "MissingMandatoryKeys",
+            "logs": logs,
+        }
+
+    p = Proxy.objects.filter(ip_address=ip_address).first() # More efficient way to get one object or None
+    
+    if p:
+        p.provider = provider
+        p.type = proxy_type
+        p.save()
+        resp = {
+            "status": "success",
+            "message": f"Updated Proxy: {provider} - {proxy_type} - {ip_address}",
+            "object": model_to_dict(p),
+            "label": "ProxyUpdated",
+        }
+        log_message(f"Updated proxy with IP: {ip_address}")
+    else:
+        p = Proxy(
+            provider=provider,
+            type=proxy_type,
+            ip_address=ip_address,
+        )
+        p.save()
+        resp = {
+            "status": "success",
+            "message": f"Created Proxy: {provider} - {proxy_type} - {ip_address}",
+            "object": model_to_dict(p),
+            "label": "ProxyCreated",
+        }
+        log_message(f"Created new proxy with IP: {ip_address}")
+
+    resp["logs"] = logs
+    return resp
 
 def device(**kwargs):
     logs = []

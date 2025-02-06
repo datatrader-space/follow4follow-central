@@ -1,5 +1,6 @@
-from sessionbot.models import ScrapeTask,Logs,Task
+from sessionbot.models import ScrapeTask,Log,Task
 import uuid
+from django.conf import settings
 def handle_scrape_task(scrapetask,event='created',form={}):
 
     if event=='created': 
@@ -16,14 +17,14 @@ def handle_scrape_task_deletion(scrapetask):
         end_point='hashtag'
     elif 'keyword' in scrapetask.input:
         end_point='search'
-    st_tasks=Task.objects.all().filter(ref_id=scrapetask.id).filter(service=scrapetask.service).filter(end_point=end_point)
+    st_tasks=Task.objects.all().filter(ref_id=scrapetask.uuid)
     unregistered_tasks=st_tasks.filter(registered=False)
     unregistered_tasks.delete()
     registered_tasks=st_tasks.filter(registered=True)
-    registered_tasks.update(delete=True)
-    l=Logs(message='Deleted '+str(len(unregistered_tasks))+' UnRegistered Tasks for '+scrapetask.name,label='INFO',end_point='scrapetask')
+    registered_tasks.update(_delete=True)
+    l=Log(message='Deleted '+str(len(unregistered_tasks))+' UnRegistered Tasks for '+scrapetask.name,label='INFO',end_point='scrapetask')
     l.save()        
-    l=Logs(message='Queued '+str(len(registered_tasks))+' Registered Tasks  to Delete for '+scrapetask.name,label='INFO',end_point='scrapetask')
+    l=Log(message='Queued '+str(len(registered_tasks))+' Registered Tasks  to Delete for '+scrapetask.name,label='INFO',end_point='scrapetask')
     l.save()
     scrapetask.delete()
 def handle_scrape_task_creation(scrapetask,start_scraping=True):
@@ -43,7 +44,7 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 data_point='search'
             elif 'keyword' in input or 'keywords' in input:
                 end_point='search'
-                data_point='keyword'
+                data_point='search_keyword'
             elif 'hashtag' in input:
                 end_point='hashtag'
                 data_point='hastag_posts'
@@ -54,35 +55,45 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 'end_point':end_point,
                 'data_point':data_point,
                 'os':scrapetask.os,
-                'input':input.split('__')[1],
+                'input':input.split('__')[1].strip(),
                 'repeat':True,
                 'repeat_duration':'1h',
                 'add_data':{
-                'max_threads':scrapetask.max_threads,
-                'max_requests_per_day':scrapetask.max_requests_per_day 
+                'max_threads':int(scrapetask.max_threads),
+                'max_requests_per_bot':scrapetask.max_requests_per_day,
+                'max_requests_per_day':200,
+                'max_requests_per_run':5
                 },   
-                'ref_id':scrapetask.id,
+                'ref_id':scrapetask.uuid,
                 'paused':False if start_scraping else True,
                  
                             }
+            
+           
+                    
+
 
             tasks.append(task)
-       
+            
+    print(data_point)
+    print(end_point)
+    
     alloted_bots=scrapetask.childbots.all()
     _=[]
     for bot in alloted_bots:
         _.append(bot.username)
     for task in tasks:
         for bot in alloted_bots:
+            print(bot.username)
             if not bot.logged_in_on_servers:
-                l=Logs(end_point='scrapetask',label='INFO',message=bot.username+' doesnt have a server assigned. Ignoring the bot, please assign server to the bot, and edit/save scrapetask '+str(scrapetask.name) +' again')
+                l=Log(end_point='scrapetask',label='INFO',message=bot.username+' doesnt have a server assigned. Ignoring the bot, please assign server to the bot, and edit/save scrapetask '+str(scrapetask.name) +' again')
                 l.save()
             else:
-                dup_check=Task.objects.all().filter(end_point=end_point).filter(data_point=data_point).filter(input=input).filter(profile=bot.username)
+                dup_check=Task.objects.all().filter(end_point=end_point).filter(data_point=data_point).filter(input=task['input']).filter(profile=bot.username)
             
                 if len(dup_check)>0:
                     message='Excluding Duplicate Scrape Task Creation.Data: ' +str(task)
-                    l=Logs(end_point='scrapetask',label='INFO',message=message)
+                    l=Log(end_point='scrapetask',label='INFO',message=message)
                     l.save()
                     
                     continue
@@ -90,14 +101,31 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                     task.update({'os':'browser','profile':bot.username,'uuid':str(uuid.uuid1()),'server_id':bot.logged_in_on_servers.id,'registered':False})
                     t=Task(**task)
                     t.save()
+                    _={'service':'datahouse',
+                    'ref_id':t.ref_id,
+                    'end_point':"update",
+                    'data_point':'send_update_to_client',
+                    'add_data':{'data_source':[{'type':'task','identifier':t.uuid}],
+                        'client_url':settings.DATA_HOUSE_URL,
+                        'client_id':'central-v1',                                                 
+
+                    },
+                    'repeat':True,
+                    'repeat_duration':'1m',
+                    'uuid':str(uuid.uuid1())
+                                    }
+                    _=Task(**_)
+                    _.save()
+                    _.server=t.server
+                    _.save()
                     message='Successfully Created a scraping task for '+str(data_point)+' for '+str(bot.username)
-                    l=Logs(end_point='scrapetask',label='INFO',message=message)
+                    l=Log(end_point='scrapetask',label='INFO',message=message)
                     l.save()
                     print(task)
             
 
 def handle_scrapetask_state_change(scrapetask,state=False):
-    from sessionbot.models import Task, Logs
+    from sessionbot.models import Task, Log
     if 'user' in scrapetask.input:
         end_point='user'
     elif 'location' in scrapetask.input:
@@ -106,16 +134,16 @@ def handle_scrapetask_state_change(scrapetask,state=False):
         end_point='hashtag'
     elif 'keyword' in scrapetask.input:
         end_point='search'
-    st_tasks=Task.objects.all().filter(ref_id=scrapetask.id).filter(service=scrapetask.service).filter(end_point=end_point)
+    st_tasks=Task.objects.all().filter(ref_id=scrapetask.uuid).filter(service=scrapetask.service).filter(end_point=end_point)
     if state and state=='start':
         st_tasks.update(state='pending')
         st_tasks.update(paused=False)
-        l=Logs(message='Changed State to Pending for '+str(len(st_tasks))+' Tasks for scrapetask '+scrapetask.name,label='INFO',end_point='scrapetask')
+        l=Log(message='Changed State to Pending for '+str(len(st_tasks))+' Tasks for scrapetask '+scrapetask.name,label='INFO',end_point='scrapetask')
         l.save()  
     if state and state=='start':
         st_tasks.update(state='stop')
         st_tasks.update(paused=False)
-        l=Logs(message='Changed State to Paused/Stopped for '+str(len(st_tasks))+' Tasks for scrapetask '+scrapetask.name,label='INFO',end_point='scrapetask')
+        l=Log(message='Changed State to Paused/Stopped for '+str(len(st_tasks))+' Tasks for scrapetask '+scrapetask.name,label='INFO',end_point='scrapetask')
         l.save()  
 def handle_scrapetask_form_from_frontend(task):
     inputs=[]

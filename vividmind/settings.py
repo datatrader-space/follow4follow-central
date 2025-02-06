@@ -184,7 +184,7 @@ USE_LOCAL_ASSETS=True
 if USE_LOCAL_ASSETS:
     STATIC_ROOT = os.path.join(BASE_DIR, 'static')
     STATIC_URL = "/static/"
-    MEDIA_ROOT = os.path.join(os.getcwd(), '')
+    MEDIA_ROOT = os.path.join(os.getcwd(), 'media')
     MEDIA_URL = '/media/'
 else:
     STATICFILES_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
@@ -196,3 +196,5 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost",
     
 ]
+DATA_HOUSE_URL='http://localhost:82/'
+DATA_UPLOAD_MAX_MEMORY_SIZE=None

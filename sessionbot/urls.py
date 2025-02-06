@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import todo,logs,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
+from .views import sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
 from django.urls import path, include
 from sessionbot.models import Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
 from rest_framework import routers, serializers, viewsets
@@ -95,7 +95,7 @@ class ProxySerializer(serializers.HyperlinkedModelSerializer):
     id = serializers.IntegerField(read_only=True)
     class Meta:
         model=Proxy
-        exclude=['tagged_bad_on','customer']
+        
 class ProxyViewSet(viewsets.ModelViewSet):
     queryset=Proxy.objects.all()
     serializer_class=ProxySerializer
@@ -129,6 +129,7 @@ class AudienceSerializer(serializers.HyperlinkedModelSerializer):
     campaigns = BulkCampaignSerializer(many=True, read_only=True)
     class Meta:
         model=Audience
+        fields = '__all__'
 class AudienceViewSet(viewsets.ModelViewSet):    
     queryset=Audience.objects.all()
     serializer_class=AudienceSerializer 
@@ -168,6 +169,7 @@ router.register(r'tasks', TaskViewSet)
 urlpatterns = [
     path("api/resource/bulk-campaign/", bulk_campaign, name='bulk_campaign'),
     path("api/resource/create/", createResource, name="create_resource"),
+    path("api/resource/sync_sheet/", sync_sheet, name="sync_sheet"),
     path("api/reports/logs", createResource, name="view_logs"),
     path('api/resource/', include(router.urls)),
     path('api/devices/create/', createDeviceResource, name='create_device'),
@@ -177,7 +179,7 @@ urlpatterns = [
     path('api/attendance/attendance-task/', attendance_task, name='attendance_task'),
     path('api/scrapetask/', scrape_task, name='scrape_task'),
     path('api/todo/', todo, name='todo_view'),
-    path('api/logs/',logs,name='logs'),
+    path('api/logs/',log,name='logs'),
     path('api/audience/',audience,name='audience')
 
 ]

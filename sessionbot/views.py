@@ -3,7 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets
-from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Logs,Audience
+from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Log,Audience
 import json
 import requests
 import logging
@@ -29,13 +29,70 @@ def createResource(request: HttpRequest) -> JsonResponse:
         response = {'status': 'bad_request_type'}
     
     return JsonResponse(response)
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import SyncedSheet
+# Your helper function
+
+@api_view(['GET', 'POST'])  # Both GET and POST handled by this view
+def sync_sheet(request):
+    if request.method == 'GET':
+        synced_sheets = SyncedSheet.objects.all()
+        data = [
+            {
+                "id": sheet.id,
+                "google_sheet_link": sheet.google_sheet_link,
+                "spreadsheet_name": sheet.spreadsheet_name,
+                "created_at": sheet.created_at,
+            }
+            for sheet in synced_sheets
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+    elif request.method == 'POST':
+        google_sheet_link = request.data.get("google_sheet_link")
+
+        if not google_sheet_link:
+            return Response(
+                {"error": "Google sheet link is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            synced_sheet, created = SyncedSheet.objects.get_or_create(
+                google_sheet_link=google_sheet_link
+            )
+
+            payload = {"google_spreadsheet_url": google_sheet_link}
+
+            r = create_resources_from_google_sheets(**payload)
+
+            if r.get('status') == 'success':
+                return Response(
+                    {"status": "success", "data": r},
+                    status=status.HTTP_200_OK,
+                )
+            else:
+                return Response(
+                    {"status": "error", "message": r.get("message"), "details": r.get("logs")},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 @csrf_exempt
 def audience(request):
     if request.method == 'POST':
         from django.forms import model_to_dict
+        
         data = json.loads(request.body)      
         method=data.get('method')
         print(data)
+        print(method)
+        #print(data)
         if method =='get':
             from sessionbot.models import Audience
             results=[]
@@ -73,148 +130,41 @@ def audience(request):
             return JsonResponse(results,safe=False)
 
         elif method=='create':
-            from sessionbot.models import Audience
-            print(data)
-            for row in data.get('data'):
-                name=row.get('name')
-                scrape_tasks=[]
-                print(name)
-                a=Audience.objects.all().filter(name=name)
-                if len(a)>0:
-                    a=a[0]
-                    l=Logs(message='Failed to create Audience. An Audience with name '+str(name)+' already exists',end_point='audience')
-                    l.save()
+           logs=[]
+           from sessionbot.models import Audience
+           from sessionbot.handlers.audience import handle_audience_creation
+           for row in data.get('data'):
+            print(row)
+            a=Audience.objects.all().filter(name=row['name'])
+            if len(a)>0:
+                a=a[0]
+                l=Log(message='Failed to create Audience. An Audience with name '+str(row['name'])+' already exists',end_point='audience')
+                l.save()
+                logs.append('Failed to create Audience. An Audience with name '+str(row['name'])+' already exists''')
+                return JsonResponse({'status': 'failed','logs':logs}, status=200)
+            else:
+                a=Audience()
+                try:
+                    outs=handle_audience_creation(a,row)
+                    if outs:
+                        logs.extend(outs) 
+                except Exception as e:
+                    import traceback
+                    print(traceback.format_exc())
+                    logs.append({'error':e,'row':row})
+                    print(e)
+                    a.delete()
+                    return JsonResponse({'status': 'failed'}, status=400)
                 else:
-                    a=Audience()
-                for id in row.get('scrapetask',[]):
-                    s=ScrapeTask.objects.all().filter(id=id)
-                    
-                    if len(s)>0:
-                        s=s[0]
-                        scrape_tasks.append(s)
-                        if 'followers' in s.input:
-                            data_point='user_followers'
-                            end_point='user'
-                        tasks_for_scrape_task=Task.objects.all().filter(ref_id=s.id).filter(end_point=end_point).filter(data_point=data_point)
-                        fields_to_compare=[]
-                        check_for_presence_ofs=[]
-                        for field_to_compare in row.get('fields_to_compare'):
-                                print(field_to_compare.get('value'))
-                                if field_to_compare.get('type')=='str' and not field_to_compare.get('value'):
-                                    _={'key':field_to_compare.get('key'),'value':'str'}
-                                elif field_to_compare.get('type')=='int' and field_to_compare.get('value')==None:
-                                    _={'key':field_to_compare.get('key'),'value':'int'}
-                                elif field_to_compare.get('type')=='boolean':
-                                    _={'key':field_to_compare.get('key'),'value':field_to_compare.get('value')}
-                                else:
-                                    continue
-                                fields_to_compare.append(_)
-                        
-                        for check_for_presence_of in row.get('check_for_presence_of'):
-                            _={'key':check_for_presence_of.get('key'),'value':check_for_presence_of.get('value')}
-                            check_for_presence_ofs.append(_)
-                        print(fields_to_compare)
-                        print(check_for_presence_ofs)
-                    a.cleaning_configuration={'fields_to_compare':row.get('fields_to_compare'),'check_for_presence_of':row.get('check_for_presence_of')}
-                    data_enrichments=row.get('data_enrichments')
-                    data_enrichments.update({'ai_Service':row.get('ai_service')})
-                    a.enrichment_configuration=data_enrichments
-
-                    if row.get('save_to_googlesheet'):
-                        storage_configuration={'save_to_googlesheet':True,'google_sheet_url':row.get('google_sheet_url'),'local':True}
-                    else:
-                        storage_configuration={'local':True,'save_to_googlesheet':False}
-                    a.storage_configuration=storage_configuration
-                    a.name=name
-                    a.service=row.get('service')
-                    a.save()
-                    a.scrape_tasks.set(scrape_tasks)
-                    for task in tasks_for_scrape_task:
-                        
-                        _={'service':'cleaner',
-                        'ref_id':a.id,
-                        'end_point':row.get('service'),
-                        'data_point':'clean_user_followers',
-                        'add_data':{'data_source':[{'type':'task','identifier':task.uuid},
-                                                    #{'type':'storage_block','identifier':'dancingtheearth','service':'instagram'},
-                                                    #{'type':'data_point','service':'instagram','identifier':'user_followers','end_point':'user',
-                                                    # 'input':'dancingtheearth'},
-                                                    #{'type':'google_sheet','link':'somelink'}                         
-                                                    ],
-                        
-                            'fields_to_compare':fields_to_compare,
-                            'check_for_presence_of':check_for_presence_ofs,
-                            'save_to_googlesheet':False#'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0'
-                            
-                                                        
-
-                        },
-                        'uuid':str(uuid.uuid1())
-                        }
-
-                        t=Task(**_)
-                        t.server=task.server
-                        t.dependent_on=task
-                        t.save()
-
-                        if a.enrichment_configuration.get('nationalityEnrichment'):
-                            _={'service':'data_enricher',
-                                                'ref_id':a.id,
-                                                'end_point':"Enrich",
-                                                'data_point':'enrich',
-                                                'add_data':{'data_source':[{'type':'task','identifier':t.uuid}],
-                                                            'service':'openai',
-                                                            'columns':['name'],
-                                                            'prompt': "For the name {name}, provide the following details:\n" \
-                                            "1. Type (e.g., Person, Brand, etc.)\n" \
-                                            "2. Gender (if it's a person's name)\n" \
-                                            "3. Country of origin or association\n\n\
-                                            and follow this strictly."\
-                                            "Try to provide the details based on their names and also don't focus on any special characters or icons in the name"\
-                                            "Try to provide the details regarding country and gender while focusing on the name and not focusing on icons in the name."\
-                                            "If you don't have any information, just keep the fields empty, please.",
-                                            'output_column_names':['country','gender','type'],
-
-                                                    'save_to_googlesheet':True,
-                                                    'spreadsheet_url':'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0',
-                                                    'worksheet_name':'test'
-                                                                                
-
-                                                },
-                                                'uuid':str(uuid.uuid1())
-                                            }
-                            _t=Task(**_)
-                            _t.server=t.server
-                            _t.dependent_on=t
-                            _t.save()
-                            t=_t
-                        _={'service':'audience',
-                            'ref_id':a.id,
-                            'end_point':"Save",
-                            'data_point':'save',
-                            'add_data':{'data_source':[{'type':'task','identifier':t.uuid}],
-                                        
-
-                                'save_to_googlesheet':True,
-                                'spreadsheet_url':'https://docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0',
-                                'worksheet_name':'audience'
-                                                            
-
-                            },
-                            'uuid':str(uuid.uuid1())
-                                            }
-                        _t=Task(**_)
-                        _t.server=t.server
-                        _t.dependent_on=t
-                        _t.save()
-                        t=_t
+                    logs.append({'success':row})
+                    return JsonResponse(status=200,data={'status':'success','logs':logs})
 
 
                     
 
         elif method == 'update':            
                 pass
-                l=Logs(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
+                l=Log(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
                 l.save()
            
                 return JsonResponse(status=200,data={'status':'success'})
@@ -222,34 +172,89 @@ def audience(request):
             data=data.get('data')
             audience_id=data.get('ids')[0]
             session_id=data.get('session_id')
+            print(audience_id)
+            from sessionbot.utils import DataHouseClient
+            from django.conf import settings
+            from sessionbot.models import Audience,Task
+            d=DataHouseClient()
+            a=Audience.objects.all().filter(id=audience_id)
+            print(a)
+            if a:
+                a=a[0]
+                a.scrape_tasks
+                tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True))).values_list('uuid',flat=True)
+                #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
+            external_filters={'name':'task','uuid':list(tasks)}
+            resp=d.retrieve(object_type='profile',  external_filters=[external_filters], locking_filters=None, lock_results=False)
+            results=[]
+            resp=json.loads(resp)
+            for row in resp['data']:
+                if row.get('profile_picture'):
+                    row['profile_picture']='http://localhost:84/'+row['profile_picture']
+                results.append(row)
+            print(results)
+            return JsonResponse({'status': 'success','data':resp['data']}, status=200) 
             from sessionbot.saver import Saver
             s=Saver()
             exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
             resp=s.retrieve_audience_outputs(audience_id,exclude_blocks=exclude_blocks,keys=True)
             print(audience_id)
+            serve=[]
             for key,value in resp.items():
                 print('Request recieve')
+                if len(value)==1:
+                    serve.append(value[0])
+                    value[0].pop('profile_pic',False)
+                    value[0].pop('full_name',False)
+                else:
+                    for row in value:
+                        serve.append(row)
+                        row.pop('profile_pic',False)
+                        row.pop('full_name',False)
                 s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)
-                return JsonResponse({'status': 'success','data':value}, status=200) 
-            return JsonResponse({'status': 'success','data':[]}, status=200)                              
+                if len(serve)>=50:
+                    print(serve)
+                    return JsonResponse({'status': 'success','data':serve}, status=200) 
+            return JsonResponse({'status': 'success','data':serve}, status=200)                              
                                     
 
         elif method=='save':
             from sessionbot.saver import Saver
+            import base64
+            from io import BytesIO
+            from django.core.files import File
+            from uuid import uuid4
+            from django.conf import settings
+            import os
             s=Saver()
             audience_data=data.get('data')
             audience_id=data.get('audience_id')
             
+            for row in audience_data:
+                print(row.get('profile_pic').keys())
+                file_content_b64 =row.get('profile_pic').get('file_content')
+
+            if not file_content_b64:
+               print('file content not found')
+            else:
+                file_content = base64.b64decode(file_content_b64)
+                file_object = BytesIO(file_content)
+
+                # Generate a unique filename
+                
+                filename = str(uuid4()) + '.jpg'  # Assuming JPG format, adjust as needed
+
+                # Save the file to the media folder
+                file_path = os.path.join(settings.MEDIA_ROOT, filename)
+                print(file_path)
+                with open(file_path, 'wb') as f:
+                    f.write(file_object.getvalue())
+                    row.update({'profile_picture':filename})
             s.save_audience_outputs(audience_id,audience_data)
             return JsonResponse({'status': 'success'}, status=200)
         elif method == 'delete':
             ids = data.get('data',{}).get('ids',[])
-            for id in ids:
-              
-                    obj=Todo.objects.filter(id=id)
-                    if obj:
-                        obj=obj[0]
-                        todo.handle_todo_deletion(obj)
+            return JsonResponse({'status': 'success'}, status=200)
         elif method =='change_state':
             tasks = data.get('data',{})
             for task in tasks:
@@ -425,6 +430,7 @@ def scrape_task(request):
                     if obj:
                         obj=obj[0]
                         res=model_to_dict(obj)
+                        print(res)
                         vals=[]
                         for input in obj.input.split(','):
                             if 'followers' in input:
@@ -436,8 +442,9 @@ def scrape_task(request):
                             elif 'hashtag' in input:
                                 scrape_type='by_hashtag'
                             vals.append(input.split('__')[1])
-                            res.pop('input')
-                            res.pop('customer')
+                            print(res)
+                        res.pop('input')
+                        res.pop('customer')
                         res.pop('childbots')
                         res.update({'childbot_ids':list(obj.childbots.values_list('id','username'))})
                         res.update({'scrape_type':scrape_type,'scrape_value':','.join(vals)})
@@ -477,12 +484,12 @@ def scrape_task(request):
                 if method == 'create':                     
                     task_data = task
                     if not task.get('childbot_ids'):
-                        l=Logs(end_point='scrapetask',label='ERROR',message='Create Scrape task missing childbots. Ignoring the row. Data: '+str(task))
+                        l=Log(end_point='scrapetask',label='ERROR',message='Create Scrape task missing childbots. Ignoring the row. Data: '+str(task))
                         l.save()
                     task=scrapetask.handle_scrapetask_form_from_frontend(task)          
                     if ScrapeTask.objects.filter(name=task.get('name')):
                         print('Dup')
-                        l=Logs(end_point='scrapetask',label='ERROR',message='A Scrape task with the same name exists, Either Edit existing task or create new with similar name')
+                        l=Log(end_point='scrapetask',label='ERROR',message='A Scrape task with the same name exists, Either Edit existing task or create new with similar name')
                         l.save()
                         return JsonResponse({'error': 'A Scrape task with the same name exists, Either Edit existing task or create new with similar name'}, status=404)
                 
@@ -499,7 +506,7 @@ def scrape_task(request):
                         handle_scrape_task(s)
                     except Exception as e:
                         import traceback
-                        l=Logs(message=traceback.format_exc(),label='ERROR',end_point='scrapetask')
+                        l=Log(message=traceback.format_exc(),label='ERROR',end_point='scrapetask')
                         l.save()
                         s.delete()
         elif method == 'update':            
@@ -514,10 +521,10 @@ def scrape_task(request):
                             obj.save()
                             print(obj.childbots.all())
                             scrapetask.handle_scrape_task_creation(obj)
-                            l=Logs(message='New bots added to Scrape Task '+str(obj.name),end_point='scrapetask',label='WARNING')
+                            l=Log(message='New bots added to Scrape Task '+str(obj.name),end_point='scrapetask',label='WARNING')
 
                         else:
-                            l=Logs(message='Failed to Update Scrape Task. Object with Id doesnt exist. Data: '+str(value),end_point='scrapetask',label='WARNING')
+                            l=Log(message='Failed to Update Scrape Task. Object with Id doesnt exist. Data: '+str(value),end_point='scrapetask',label='WARNING')
                             l.save()
                             continue
                 return JsonResponse(status=200,data={'status':'success'})
@@ -595,13 +602,13 @@ def todo(request):
                        
                     if Todo.objects.filter(name=task.get('name')):
                         print('Dup')
-                        l=Logs(end_point='todo',label='ERROR',message='A TODO with the same name exists, Either Edit existing TODO or create new with similar name')
+                        l=Log(end_point='todo',label='ERROR',message='A TODO with the same name exists, Either Edit existing TODO or create new with similar name')
                         l.save()
                         return JsonResponse({'error': 'A TODO with the same name exists, Either Edit existing task or create new with similar name'}, status=404)
                     else:
                         existing_todos=Todo.objects.filter(google_drive_root_folder_name=task.get('google_drive_root_folder_name')).filter(childbots=task.get('bots'))                      
                         if len(existing_todos)>0:
-                            l=Logs(end_point='todo',label='ERROR',message='A TODO with the same name google driver root folder and selected bot exists, We dont recommend creating duplicates')
+                            l=Log(end_point='todo',label='ERROR',message='A TODO with the same name google driver root folder and selected bot exists, We dont recommend creating duplicates')
                             l.save()
                         else:
                             childbot_ids=task.pop('childbot_ids',False)
@@ -617,7 +624,7 @@ def todo(request):
                             todo.handle_todo_creation(t)
                         except Exception as e:
                             import traceback
-                            l=Logs(message=traceback.format_exc(),label='ERROR',end_point='todo')
+                            l=Log(message=traceback.format_exc(),label='ERROR',end_point='todo')
                             l.save()
                             t.delete()   
         elif method == 'update':            
@@ -638,10 +645,10 @@ def todo(request):
                             todo.handle_todo_creation(obj)
                             
 
-                            l=Logs(message='New bots added to Todo '+str(obj.name),end_point='todo',label='INFO')
+                            l=Log(message='New bots added to Todo '+str(obj.name),end_point='todo',label='INFO')
 
                         else:
-                            l=Logs(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
+                            l=Log(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
                             l.save()
                             continue
                 return JsonResponse(status=200,data={'status':'success'})
@@ -938,12 +945,12 @@ def attendance_task(request):
     return HttpResponse('Method not allowed', status=405)
 
 @csrf_exempt
-def logs(request):
+def log(request):
     if request.method == 'POST':
-        from sessionbot.models import Logs
+        from sessionbot.models import Log
         data = json.loads(request.body)
         print(data)
        
-        logs=Logs.objects.all().filter(end_point=data.get('end_point')).order_by('-timestamp').values()
-        return JsonResponse(list(logs),safe=False)
+        Log=Log.objects.all().filter(end_point=data.get('end_point')).order_by('-timestamp').values()
+        return JsonResponse(list(Log),safe=False)
     return HttpResponse('Method not allowed', status=405)

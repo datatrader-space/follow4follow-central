@@ -1,10 +1,13 @@
 from django.contrib import admin
-from sessionbot.models import Audience,Logs,TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings, Task,Todo
+from sessionbot.models import SyncedSheet,Workflow,Job,DataHouseSyncStatus,Audience,Log,TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings, Task,Todo
 import json
+admin.site.register(Workflow)
+admin.site.register(Job)
 admin.site.register(EmailProvider)
 admin.site.register(TargetSettings)
-admin.site.register(Logs)
+admin.site.register(Log)
 admin.site.register(Audience)
+admin.site.register(SyncedSheet)
 from django_admin_relation_links import AdminChangeLinksMixin
 
 from sessionbot.resource_utils import convert_bulk_campaign_to_workflow_for_vivide_mind_worker
@@ -42,10 +45,10 @@ class SessionBotAdmin(AdminChangeLinksMixin,
         print(request)
 admin.site.register(ChildBot,SessionBotAdmin)
 admin.site.register(Server)
-
+admin.site.register(DataHouseSyncStatus)
 class TaskAdmin(admin.ModelAdmin):
-    list_filter=['status','os','end_point','data_point','device']
-    list_display=['uuid','service','end_point','data_point','os','repeat','profile','device','status','retries_count']
+    list_filter=['ref_id','status','os','end_point','data_point','device']
+    list_display=['uuid','ref_id','service','end_point','data_point','created_at','input','os','repeat','profile','device','status','retries_count']
     actions = ['start_tasks','stop_tasks','resume_tasks','pause_tasks']
     search_fields = (
                      'profile',

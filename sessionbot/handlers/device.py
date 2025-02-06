@@ -4,5 +4,6 @@ def formatify_for_worker(serial_number):
     device=Device.objects.all().filter(serial_number=serial_number)
     if device:
         device=model_to_dict(device[0])
+        device['uuid']=device.get('uuid')
         device.pop('connected_to_server', None)
         return device

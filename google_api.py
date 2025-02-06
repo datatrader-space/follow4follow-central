@@ -206,6 +206,7 @@ class GoogleSheet(GoogleAPI):
             try:
                 self.spreadsheet=self.connection.open_by_url(self.spreadsheet_url)
             except Exception as e:
+                print(e)
                 if 'internal error' in str(e):
                     return self.open_google_sheet()
             #print('Opening Google Sheet using URL')

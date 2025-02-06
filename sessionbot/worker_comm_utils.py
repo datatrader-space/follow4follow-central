@@ -3,7 +3,7 @@ from django.forms import model_to_dict
 from sessionbot.models import BulkCampaign, Device, Task,ScrapeTask
 import requests
 import json
-from sessionbot.models import Logs
+from sessionbot.models import Log
 
 def communicate_todo_with_worker(todo):
     for bot in todo.bots.all():
@@ -240,7 +240,7 @@ def convert_bulk_campaign_to_worker_tasks(bulk_campaign):
   
     for bot in automation_task.childbots.all():
         if not bot.logged_in_on_servers:
-            l=Logs(end_point='bulkcampaign',label='INFO',message=bot.username+' doesnt have a server assigned. Ignoring the bot, please assign server to the bot, and edit/save bulkcampaign '+str(automation_task.name) +' again')
+            l=Log(end_point='bulkcampaign',label='INFO',message=bot.username+' doesnt have a server assigned. Ignoring the bot, please assign server to the bot, and edit/save bulkcampaign '+str(automation_task.name) +' again')
             l.save()
             continue
         for job in jobs:

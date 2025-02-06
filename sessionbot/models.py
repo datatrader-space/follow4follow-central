@@ -36,7 +36,8 @@ SERVICES: Tuple[Tuple[str]] = (
     ('cleaner','cleaner'),
     ('data_enricher','Data Enricher'),
     ('openai','OpenAI'),
-    ('audience','Audience')
+    ('audience','Audience'),
+    ('datahouse','DataHouse')
 )
 
 OPERATIONS: Dict[str, Tuple[Tuple[str]]] = {
@@ -168,6 +169,38 @@ scrapper_type_choices=(
                 ('followings','Followings'),
                 ('comments','Comments'),
                 )
+class BaseModel(models.Model):
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.pk:  # Ensure object has been saved
+            if not self.uuid:
+                self.uuid=uuid.uuid1()
+                self.save()
+            DataHouseSyncStatus.objects.create(
+                model_name=self.__class__.__name__,
+                object_id=str(self.uuid),
+                operation='UPDATE' if self.pk else 'CREATE'
+            )
+            
+
+    def delete(self, *args, **kwargs):
+        original_uuid= self.uuid
+        class_name=self.__class__.__name__
+        worker=None
+        if hasattr(self,'server'):
+            worker=self.server
+        super().delete(*args, **kwargs)
+        DataHouseSyncStatus.objects.create(
+                model_name=class_name,
+                object_id=original_uuid,
+                operation='DELETE',
+                worker=worker
+            )
+        
+        
 class EmailProvider( models.Model):
     customer = models.ForeignKey(
         Customer,
@@ -200,10 +233,10 @@ class EmailProvider( models.Model):
     
     def __str__(self):
         return self.name
-class Server(models.Model):
+class Server(BaseModel):
     class Meta:
         verbose_name = "server"
-        
+    
     name = models.CharField(
         max_length=5000,
         blank=True,
@@ -251,7 +284,7 @@ class Server(models.Model):
     access_secret_key=models.CharField(unique=True,max_length=5000,null=True,blank=True)
     maximum_parallel_tasks_allowed = models.IntegerField(default=1)
     created_on = models.DateTimeField(default=timezone.now)
-    
+    uuid=models.UUIDField(blank=False,null=True,unique=True,default=uuid.uuid1())
 
     def __str__(self):
         return self.name
@@ -269,7 +302,8 @@ class Server(models.Model):
 
     def terminate_instance(self): pass
 
-class Device(models.Model):
+class Device(BaseModel):
+    uuid=models.UUIDField(blank=False,null=True,unique=True)
     name=models.CharField(max_length=500,blank=False,unique=True,null=False)
     serial_number=models.CharField(max_length=500,blank=False,unique=True,null=False)
     info=models.JSONField(null=True,blank=True)
@@ -279,7 +313,7 @@ class Device(models.Model):
     def __str__(self):
         return self.serial_number
 
-class ChildBot(models.Model):
+class ChildBot(BaseModel):
     """[summary]
 
     Args:
@@ -288,7 +322,7 @@ class ChildBot(models.Model):
     Returns:
         [type]: [description]
     """
-    
+    uuid=models.UUIDField(blank=False,null=True,unique=True)
     display_name = models.CharField(max_length=100,
                                     null=True,
                                     blank=True
@@ -380,9 +414,7 @@ class ChildBot(models.Model):
 
     post_count = models.PositiveIntegerField(default=0)
 
-    profile_picture = models.URLField(blank=True, null=True, max_length=500, default="https://th.bing.com/th/id/R.363f7e495d2d2e4f1407657b52c37cdb?rik=wCUstSresWmNMA&pid=ImgRaw&r=0")
 
-    dob = models.DateField(null=True, blank=True)
 
     bio = models.TextField(blank=True, null=True, max_length=500)
 
@@ -392,11 +424,9 @@ class ChildBot(models.Model):
 
     
 
-    created_on = models.DateField(default=timezone.now)
+    created_on = models.DateTimeField(default=timezone.now)
 
     # TODO create a default storage class to use for cookies
-    cookie = models.FileField(upload_to='login/cookies', blank=True, null=True, default="https://gist.github.com/mrunkel/7f16fad35250da476ab0cc58aebde7ec")
-
     
     email_provider = models.ForeignKey(EmailProvider,
                                        blank=True,
@@ -514,58 +544,40 @@ class ChildBot(models.Model):
         return f'ChildBot::{self.id}'
 
 
-class Proxy(models.Model):
-    LOCK_DURATION = int(0.5*3600)
+class Proxy(BaseModel):
+    uuid=models.UUIDField(blank=False,null=True,unique=True)
+    type = models.CharField(max_length=20, choices=[('static', 'Static'), ('rotating', 'Rotating')], default='static')
+    provider = models.CharField(max_length=50,null=True)  # No choices, free text input
+    proxy_url = models.CharField(max_length=200)  # Store in username:password:ip:port or ip:port format
 
-    customer = models.ForeignKey(
-        Customer,
-        null=True,
-        blank=True,
-        on_delete=models.deletion.CASCADE
-    )
-    max_threads=models.IntegerField(default=1)
-    proxy_url = models.CharField(max_length=500, null=True, blank=True)
+    def __str__(self):
+        return f"{self.provider} - {self.type} - {self.masked_ip()}"
 
-    ua_string = models.CharField(max_length=5000, null=True)
+    def masked_ip(self):
+        """Masks the IP address for display purposes (security)."""
+        parts = self.proxy_url.split(":")
+        if len(parts) > 2:  # Contains username/password
+            return f"{parts[-2]}:{parts[-1]}"  # Return only IP and port
+        else:
+            return self.proxy_url  # No username and password, return IP:port
 
-    is_available = models.BooleanField(default=True)
+    def get_ip_port(self):
+        """Returns the ip:port part of ip_address"""
+        parts = self.proxy_url.split(":")
+        if len(parts) > 2:  # Contains username/password
+            return f"{parts[-2]}:{parts[-1]}"
+        else:
+            return self.proxy_url
 
-    
-
-    proxy_blacklisted = models.BooleanField(default=False)
-
-   
-
-    provider = models.CharField(max_length=1000, null=True, blank=True)
-
-    
-    tagged_bad_on = models.DateTimeField(null=True, blank=True)
-
-    verified = models.BooleanField(default=False)
-
-    proxy_type = models.CharField(
-        max_length=20,
-        choices=(
-            ('static_proxy', 'Static Proxy'),
-            ('rotating_proxy', "Rotating Proxy")
-        ),
-        default="static_proxy"
-    )
-
-    proxy_protocol = models.CharField(
-        max_length=20,
-        choices=(
-            ("http", 'Http'),
-            ("socks", 'Socks'),
-            ("http_socks", 'Both')
-        ),
-        default='http'
-    )
-
-    connected_to_server=models.ForeignKey(Server,on_delete=models.SET_NULL,null=True)
+    def get_credentials(self):
+        """Returns username and password as a tuple or None, None if not present"""
+        parts = self.proxy_url.split(":")
+        if len(parts) > 2:  # username:password:ip:port
+            return parts[0], parts[1]
+        return None, None
 
     class Meta:
-        unique_together = ('customer', 'proxy_url')
+        
         verbose_name_plural = "proxies"
 
     @classmethod
@@ -665,7 +677,29 @@ class Proxy(models.Model):
 
     def __str__(self):
         return f'{self.proxy_url}'  
+from django.db import models
 
+class SyncedSheet(models.Model):
+    google_spreadsheet_url = models.URLField(max_length=200, unique=True)
+    spreadsheet_name = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    details = models.JSONField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Sync at {self.created_at} - {self.spreadsheet_name or self.shortened_link()}"
+
+    def shortened_link(self):
+        try:
+            parts = self.google_sheet_link.split('/d/')
+            if len(parts) > 1:
+                spreadsheet_id = parts[1].split('/')[0]
+                return f".../{spreadsheet_id}/..."
+            return self.google_sheet_link
+        except IndexError:
+            return self.google_sheet_link
+
+    class Meta:
+        ordering = ['-created_at']
 class CampaignTextContent(models.Model):
     name=models.CharField(blank=True,null=True,max_length=5000)
     comment_list = models.TextField(blank=True, null=True)
@@ -691,7 +725,8 @@ class TargetSettings(models.Model):
     def __str__(self):
         return self.name
 
-class Settings(models.Model):
+class Settings(BaseModel):
+    uuid=models.UUIDField(blank=False,null=True,unique=True)
     name=models.CharField(unique=True,max_length=5000)
     start_time = models.DateTimeField('start_time', blank=True, null=True)
 
@@ -718,7 +753,7 @@ class Sharing(models.Model):
 
     def __str__(self):
         return self.name
-class ScrapeTask(models.Model):
+class ScrapeTask(BaseModel):
 
     service=models.CharField(choices=SERVICES,max_length=5000,blank=False,null=False)
     customer = models.ForeignKey(Customer,
@@ -737,9 +772,11 @@ class ScrapeTask(models.Model):
     threading=models.BooleanField(default=False)
     max_threads=models.IntegerField(default=5)
     max_requests_per_day=models.IntegerField(default=100)
+    uuid=models.UUIDField(unique=True,blank=True,null=True)
 
     def __str__(self):
         return self.name
+    
 class DemoGraphic(models.Model):
     name=models.CharField(unique=True,max_length=5000)
     scrape_tasks=models.ManyToManyField(ScrapeTask)
@@ -1289,17 +1326,19 @@ MONITOR_SCHEMA=   {
 }
 
 from django_jsonform.models.fields import JSONField
-class Audience(models.Model):
+class Audience(BaseModel):
     service=models.CharField(choices=SERVICES,blank=False,null=False,default='instagram',max_length=500)
     name=models.CharField(blank=False,null=False,unique=True,max_length=500)
     scrape_tasks=models.ManyToManyField(ScrapeTask,blank=False,null=False)
     cleaning_configuration=models.JSONField(default={},blank=False,null=False)
     enrichment_configuration=models.JSONField(default={},blank=False,null=False)
     storage_configuration=models.JSONField(default={},blank=False,null=False)
-
+    uuid=models.UUIDField(unique=True,default=uuid.uuid1())
+    
     def __str__(self):
         return self.name
-class BulkCampaign(models.Model):
+    
+class BulkCampaign(BaseModel):
     """_summary_
 
     Args:
@@ -1334,6 +1373,7 @@ class BulkCampaign(models.Model):
         ('deleted', 'Deleted'),
         ('draft', 'Draft')
     )
+    uuid=models.CharField(default=str(uuid.uuid1()),unique=True,max_length=50000)
     name = models.CharField(max_length=5000,
                             blank=False,
                             null=False,
@@ -1367,6 +1407,7 @@ class BulkCampaign(models.Model):
     childbots=models.ManyToManyField(ChildBot,related_name='campaign')
     devices=models.ManyToManyField(Device,blank=True)
     audience=models.ForeignKey(Audience,blank=True,null=True,on_delete=models.SET_NULL)
+    filters=models.JSONField(blank=True,null=True,default={})
     scrape_tasks=models.ManyToManyField(ScrapeTask,blank=True,related_name='campaign')
     proxies=models.ManyToManyField(Proxy,related_name='proxies',null=True,blank=True)
     #localstore=models.BooleanField(default=False)
@@ -1422,11 +1463,8 @@ class BulkCampaign(models.Model):
 
     comment_id = models.CharField(max_length=100, blank=True, null=True)
 
-    request_id = models.UUIDField(
-        default=uuid.uuid4,
-        editable=False
-    )
-
+    
+    
     # Add Field tracking
     '''state_tracker = FieldTracker(
         fields=[
@@ -1633,10 +1671,10 @@ class BulkCampaign(models.Model):
     def __str__(self):
         return self.name 
 
-class Task(models.Model):
+class Task(BaseModel):
     
     uuid=models.CharField(default=str(uuid.uuid1()),unique=True,max_length=50000)
-    ref_id=models.CharField(max_length=5000,default=uuid)
+    ref_id=models.CharField(verbose_name='reference id of the job i.e. campaign or audience or scrape task',blank=True,null=True,max_length=500)
     service = models.CharField(choices=SERVICES,
                                default='instagram',
                                max_length=50,
@@ -1675,8 +1713,9 @@ class Task(models.Model):
     report=models.BooleanField(default=False)
     retries_count=models.IntegerField(default=0)
     paused=models.BooleanField(default=False)
-    delete=models.BooleanField(default=False)
+    _delete=models.BooleanField(default=False)
     registered=models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=dt.datetime.now())
     def save(self, *args, **kwargs):
         if not self.uuid:
             self.uuid = uuid.uuid4()
@@ -1685,23 +1724,70 @@ class Task(models.Model):
     def __str__(self):
         return self.ref_id                
 
-    username=models.CharField(max_length=225,blank=False,unique=True,null=True)
-    info=models.JSONField(default=dict,blank=False,null=False)
     
-    versions=models.JSONField(default=dict)
     def __str__(self):
         return str(self.id)
 
         return self.name
+class Job(models.Model):
+    name = models.CharField(max_length=255)
+    tasks = models.ManyToManyField(Task)
+    depends_on = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='dependencies')
+    status = models.CharField(max_length=20, default="PENDING", choices=[
+        ("PENDING", "Pending"),
+        ("RUNNING", "Running"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    ])
+    # ... other job fields
 
+    def __str__(self):
+        return self.name
+
+    def check_tasks_completed(self):
+        """Checks if all associated tasks are completed and updates job status."""
+        all_completed = all(task.status == "COMPLETED" for task in self.tasks.all())
+        if all_completed:
+            self.status = "COMPLETED"
+            self.save()
+            return True
+        return False
+
+class Workflow(models.Model):
+    name = models.CharField(max_length=255)
+    jobs = models.ManyToManyField(Job)
+    # ... other workflow fields
+
+    def __str__(self):
+        return self.name
+
+    def run_next_jobs(self, completed_job):
+        """Triggers the execution of jobs that depend on the completed job."""
+        dependent_jobs = completed_job.dependencies.filter(status="PENDING")
+        for job in dependent_jobs:
+            job.status = "RUNNING"
+            job.save()
+            # Trigger job execution here (e.g., with Celery)
+            print(f"Triggering job: {job.name} (dependent on {completed_job.name})")  # Replace with actual execution logic
+
+    def job_completed(self, job):
+        """Called when a job within this workflow completes."""
+        if job.check_tasks_completed():
+            self.run_next_jobs(job)
+        else:
+            print(f"Job {job.name} has some tasks pending.")  # Log pending tasks
 
 from django.db.models.signals import post_save,m2m_changed ,post_delete # Signal for post-save operations
 from django.dispatch import receiver
 
 @receiver(post_delete, sender=BulkCampaign)
 def handle_mymodel_delete(sender, instance, **kwargs):
-    Task.objects.all().filter(end_point='interact').filter(ref_id=instance.id).update(delete=True)
-    Task.objects.all().filter(data_point='condition_handler').filter(ref_id=instance.id).update(delete=True)
+    Task.objects.all().filter(end_point='interact').filter(ref_id=instance.uuid).update(_delete=True)
+    Task.objects.all().filter(data_point='condition_handler').filter(ref_id=instance.uuid).update(_delete=True)
+@receiver(post_delete, sender=Audience)
+def handle_mymodel_delete(sender, instance, **kwargs):
+    Task.objects.all().filter(ref_id=instance.uuid).update(_delete=True)
+    
 @receiver(post_delete, sender=ChildBot)
 def handle_mymodel_delete(sender, instance, **kwargs):
     Task.objects.all().filter(profile=instance.username).update(delete=True)
@@ -1721,7 +1807,7 @@ s={
     },
     'required': ['country_slug','city_id']
 }
-class Todo(models.Model):
+class Todo(BaseModel):
     service=models.CharField(choices=SERVICES,blank=False,null=False,default='instagram',max_length=500)
     name = models.CharField(max_length=255)
     #os=models.CharField(choices=(('android','android'),('browser','browser')))
@@ -1740,10 +1826,12 @@ class Todo(models.Model):
     repeat=models.BooleanField(default=False)
     repeat_after=models.IntegerField(help_text='Enter the number of hours to repeat the task after',blank=True,null=True)
     childbots=models.ManyToManyField(ChildBot)
+    
     def __str__(self):
         return self.name
 
-class Logs(models.Model):
+class Log(models.Model):
+    uuid=models.UUIDField(blank=True,null=True,default=uuid.uuid1())
     timestamp=models.DateTimeField(default=datetime.now())
     message=models.TextField()
     label=models.CharField(max_length=5000)
@@ -1753,5 +1841,21 @@ class Logs(models.Model):
     def __str__(self):
         return self.message
 
+class DataHouseSyncStatus(models.Model):
+    model_name = models.CharField(max_length=255)
+    object_id = models.UUIDField(null=True)
+    operation = models.CharField(max_length=50, choices=[('CREATE', 'CREATE'), ('UPDATE', 'UPDATE'), ('DELETE', 'DELETE')])
+    created_at = models.DateTimeField(auto_now_add=True)
+    registered=models.BooleanField(default=False)
+    worker=models.ForeignKey(Server,blank=True,null=True,on_delete=models.SET_NULL)
 
 
+class AnalysisResult(models.Model):
+    name = models.CharField(max_length=255, db_index=True)  # Name of the analysis (unique if needed)
+    datetime = models.DateTimeField(auto_now_add=True, db_index=True)  # When the analysis was run
+    data = models.JSONField()  # The analysis results as JSON
+    range_start = models.DateTimeField(null=True, blank=True, db_index=True) # Start of the time range analyzed
+    range_end = models.DateTimeField(null=True, blank=True, db_index=True)  # End of the time range analyzed
+
+    class Meta:
+        ordering = ['-datetime'] # Order by latest analysis first

@@ -2,8 +2,7 @@
 
 import datetime
 from django.db import migrations, models
-
-
+import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -30,5 +29,10 @@ class Migration(migrations.Migration):
             model_name='task',
             name='uuid',
             field=models.CharField(default='73b89e75-a672-11ef-a825-047c1611323a', max_length=50000, unique=True),
+        ),
+        migrations.AddField(
+            model_name='scrapetask',
+            name='uuid',
+            field=models.UUIDField(default=uuid.UUID('325c1561-d8c1-11ef-9f8f-047c1611323a'), unique=True),
         ),
     ]
