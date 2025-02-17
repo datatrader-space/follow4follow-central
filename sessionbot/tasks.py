@@ -77,6 +77,7 @@ def sync_with_data_house_and_workers():
             print(status.id)
             
             if not model_instance and not final_operation=='DELETE':
+                print(final_operation)
                 print('continuing')
                 continue
             from sessionbot.utils import convert_uuid_datetime_for_json
@@ -97,11 +98,11 @@ def sync_with_data_house_and_workers():
             if model_class and issubclass(model_class, (Task, ChildBot, Proxy,Device)):
                 try:
                     if model_class==Task:
-                        server = model_instance.server
+                        server = status.worker
                     if model_class==ChildBot:
-                        server=model_instance.logged_in_on_servers
+                        server=status.worker
                     if model_class==Device:
-                        server=model_instance.connected_to_server
+                        server=status.worker
                     worker_url = f"{server.public_ip}crawl/api/sync/"
                     if worker_url not in target_payloads:
                         target_payloads[worker_url] = []
@@ -114,7 +115,7 @@ def sync_with_data_house_and_workers():
             target_payloads[data_house_url].append(message) # Always send to datahouse
 
     all_successful_uuids = {}
-    print(target_payloads)
+
     for target_url, payloads in target_payloads.items():
         print(target_url)
         headers = {"Content-Type": "application/json"}
@@ -149,7 +150,7 @@ def communicate_tasks_with_worker():
     import json
     import requests as r
     from django.forms import model_to_dict
-    unregistered_tasks=Task.objects.all()
+    unregistered_tasks=Task.objects.all().filter(registered=False)
     delete_tasks=Task.objects.all().filter(_delete=True)
     
     unregistered_task=unregistered_tasks.union(delete_tasks)

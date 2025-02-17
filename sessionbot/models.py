@@ -1716,10 +1716,7 @@ class Task(BaseModel):
     _delete=models.BooleanField(default=False)
     registered=models.BooleanField(default=False)
     created_at = models.DateTimeField(default=dt.datetime.now())
-    def save(self, *args, **kwargs):
-        if not self.uuid:
-            self.uuid = uuid.uuid4()
-        super().save(*args, **kwargs)
+    
 
     def __str__(self):
         return self.ref_id                
@@ -1790,7 +1787,7 @@ def handle_mymodel_delete(sender, instance, **kwargs):
     
 @receiver(post_delete, sender=ChildBot)
 def handle_mymodel_delete(sender, instance, **kwargs):
-    Task.objects.all().filter(profile=instance.username).update(delete=True)
+    Task.objects.all().filter(profile=instance.username).update(_delete=True)
     
         
 #m2m_changed.connect(post_save_handler, sender=BulkCampaign.childbots.through)    
@@ -1832,11 +1829,12 @@ class Todo(BaseModel):
 
 class Log(models.Model):
     uuid=models.UUIDField(blank=True,null=True,default=uuid.uuid1())
+    
     timestamp=models.DateTimeField(default=datetime.now())
     message=models.TextField()
     label=models.CharField(max_length=5000)
     end_point=models.CharField(max_length=500)
-    identifier=models.IntegerField(blank=True,null=True)
+
 
     def __str__(self):
         return self.message

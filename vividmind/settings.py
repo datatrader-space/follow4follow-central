@@ -196,5 +196,6 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost",
     
 ]
-DATA_HOUSE_URL='http://localhost:82/'
+DATA_HOUSE_URL='http://208.109.241.136:8080/'
+STORAGE_HOUSE_URL='http://208.109.246.14:8080/'
 DATA_UPLOAD_MAX_MEMORY_SIZE=None

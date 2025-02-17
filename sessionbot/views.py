@@ -24,6 +24,7 @@ def createResource(request: HttpRequest) -> JsonResponse:
         except json.JSONDecodeError:
             response = {'status': 'error', 'message': 'Invalid JSON payload'}
         except Exception as e:
+            print(e)
             response = {'status': 'error', 'message': str(e)}
     else:
         response = {'status': 'bad_request_type'}
@@ -182,17 +183,37 @@ def audience(request):
             if a:
                 a=a[0]
                 a.scrape_tasks
-                tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True))).values_list('uuid',flat=True)
+                
+
+                    
+                
+                tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True)))
                 #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
-            external_filters={'name':'task','uuid':list(tasks)}
-            resp=d.retrieve(object_type='profile',  external_filters=[external_filters], locking_filters=None, lock_results=False)
+            print(tasks)
+            filters={'tasks__uuid.in':list(tasks),'info__rest_id.isnull':False}
+            filters={'following__following__username.in':['smiirl']}
+            filters={'posts__text__content.contains':'lahore'}
+            resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False)
             results=[]
             resp=json.loads(resp)
             for row in resp['data']:
                 if row.get('profile_picture'):
-                    row['profile_picture']='http://localhost:84/'+row['profile_picture']
+                    url=settings.STORAGE_HOUSE_URL+row['profile_picture']
+                    import urllib
+                    import re
+                    cleaned_url = url.replace("\\", "/")
+
+                    # 2. Parse the URL to handle encoding issues
+                    parsed_url = urllib.parse.urlparse(cleaned_url)
+
+                    # 3. Reconstruct the URL with proper encoding
+                    cleaned_url = urllib.parse.urlunparse(parsed_url)
+                    cleaned_url = re.sub(r"(?<!:)/{2,}", "/", cleaned_url)
+                    print(url)
+                    print(cleaned_url)
+                    row['profile_picture']=cleaned_url
                 results.append(row)
-            print(results)
+            
             return JsonResponse({'status': 'success','data':resp['data']}, status=200) 
             from sessionbot.saver import Saver
             s=Saver()
@@ -954,3 +975,94 @@ def log(request):
         Log=Log.objects.all().filter(end_point=data.get('end_point')).order_by('-timestamp').values()
         return JsonResponse(list(Log),safe=False)
     return HttpResponse('Method not allowed', status=405)
+
+
+import json
+from django.http import JsonResponse
+from .models import ChildBot, Task, Log
+
+from django.db.models import Q
+from datetime import datetime
+import uuid
+@csrf_exempt
+def task_actions(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            print(data)
+            childbot_ids = data.get('childbot_ids')
+            action = data.get('action')
+
+            if not childbot_ids or not action:
+                return JsonResponse({"error": "childbot_ids and action are required"}, status=400)
+
+            childbots = ChildBot.objects.filter(id__in=childbot_ids)
+
+            if not childbots.exists():
+                return JsonResponse({"error": "ChildBots not found"}, status=404)
+
+            response_data = []
+
+            for childbot in childbots:
+                if not childbot.logged_in_on_servers:
+                    message = f"ChildBot {childbot.username} doesnt have server assigned.Skipping"
+                    log = Log.objects.create(message=message, label="Task Running Check", end_point=request.path, )
+                    log.save()
+                    response_data.append({"message": message, "status": "warning"})
+                    continue
+                existing_task = Task.objects.filter(service=childbot.service,data_point=action,profile=childbot.username).first()            
+
+                if existing_task and existing_task.status == 'running':
+                    message = f"ChildBot {childbot.id} already running for task {existing_task.data_point}"
+                    log = Log.objects.create(message=message, label="Task Running Check", end_point=request.path, )
+                    log.save()
+                    response_data.append({"message": message, "status": "warning"})
+                    continue
+
+                if existing_task and existing_task.status == 'paused':
+                    existing_task.status = 'pending'
+                   
+                    existing_task.save()
+                    message = f"Task {existing_task.data_point} for ChildBot {childbot.id} resumed."
+                    log = Log.objects.create(message=message, label="Task Resumed", end_point=request.path, )
+                    log.save()
+                    response_data.append({"message": message, "status": "info"})
+
+
+                if not existing_task:
+                    task = Task.objects.create(service=childbot.service,end_point='interact',os='browser',interact=True, data_point=action, profile=childbot.username,uuid=uuid.uuid1(),server=childbot.logged_in_on_servers, status="pending")
+                    message = f"Task {action} created for ChildBot {childbot.id}."
+                    log = Log.objects.create(message=message, label="Task Created", end_point=request.path, )
+                    log.save()
+                    response_data.append({"message": message, "status": "success"})
+                else:
+                    task = existing_task
+                    task.data_point = action
+                    task.status = "pending"
+                    task.save()
+                    message = f"Task {action} updated for ChildBot {childbot.id}."
+                if task.server !=childbot.logged_in_on_servers:
+                    task.server=childbot.logged_in_on_servers
+                task.registered=False
+                task.save() 
+                log_message = f"ChildBot {childbot.username} started on {childbot.logged_in_on_servers.name} for task {action}"
+                log = Log.objects.create(message=message, label="Task Updated", end_point=request.path, )
+                log.save()
+                response_data.append({"message": log_message, "status": "info"})
+
+
+                from .tasks import sync_with_data_house_and_workers
+                sync_with_data_house_and_workers.delay()
+                log_message = f"ChildBot {childbot.id} started on {childbot.logged_in_on_servers.name} for task {action}"
+                log = Log.objects.create(message=log_message, label="Task Started", end_point=request.path, )
+                log.save()
+            print(response_data)
+            return JsonResponse({"messages": response_data}, status=200)
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            print(e)
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method Not Allowed"}, status=405)

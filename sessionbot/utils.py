@@ -53,24 +53,18 @@ class DataHouseClient:
         self.request_maker=requests
         
 
-    def retrieve(self, object_type, internal_filters=None, external_filters=None, locking_filters=None, lock_results=False, ref_id=None, **kwargs):
+    def retrieve(self, object_type, filters={}, locking_filters=None, lock_results=False, ref_id=None, **kwargs):
         url = f"{self.base_url}datahouse/api/provide/"  # Construct the URL
 
         payload = {
             "object_type":object_type,
-            "filters":{
-            "internal_key_filters": internal_filters or [],
-            "external_key_filters": external_filters or [],
-
-            "locking_filters": locking_filters or {},
-            },
-            "lock_results": lock_results,
+            "filters":filters,           
             "ref_id": ref_id or str(uuid.uuid4()) # Generate ref_id if not provided
         }
         
 
         try:
-            response = self.request_maker.post(url=url,json={'data':payload}) 
+            response = self.request_maker.post(url=url,json=payload) 
             return response.text
             
 

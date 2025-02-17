@@ -33,7 +33,7 @@ def handle_audience_creation(a,payload):
                 data_point='search_keyword'
                 end_point='search'
             
-            tasks_for_scrape_task=Task.objects.all().filter(ref_id=s.uuid)
+            tasks_for_scrape_task=Task.objects.all().filter(ref_id=s.uuid).exclude(data_point='send_update_to_client')
             print(tasks_for_scrape_task)
             fields_to_compare=[]
             check_for_presence_ofs=[]
@@ -68,37 +68,17 @@ def handle_audience_creation(a,payload):
         a.uuid=uuid.uuid1()
         a.save()
         a.scrape_tasks.set(scrape_tasks)
-        
+        from sessionbot.handlers.scrapetask import handle_filter_creation_for_scrapetask
         for task in tasks_for_scrape_task:
             
             uuids=[]
-            """_={'service':'cleaner',
-             'ref_id':a.uuid,
-            'end_point':'clean',
-            'data_point':'clean_data',
-            'add_data':{'data_source':[{'type':'task','identifier':task.uuid},
-                                        #{'type':'storage_block','identifier':'dancingtheearth','service':'instagram'},
-                                        #{'type':'data_point','service':'instagram','identifier':'user_followers','end_point':'user',
-                                        # 'input':'dancingtheearth'},
-                                        #{'type':'google_sheet','link':'somelink'}                         
-                                        ],
-                'repeat':True,
-                'repeat_duration':'1m',
-                'fields_to_compare':fields_to_compare,
-                'check_for_presence_of':check_for_presence_ofs,
-                'save_to_googlesheet':False#'https:#//docs.google.com/spreadsheets/d/1wTVLDWlmfTTnkrltx1iBUppJ5J_9EBYuCVXa59mhaVM/edit?gid=0#gid=0'
-                
-                                            
-
-            },
-            'repeat':True,
-            'repeat_duration':'1m',
-            'uuid':str(uuid.uuid1())
-            } """
+            filters=handle_filter_creation_for_scrapetask(s)
 
             
             print(a.uuid)
-            if a.enrichment_configuration.get('nationalityEnrichment'):
+            if a.enrichment_configuration.get('nationalityEnrichment') or a.enrichment_configuration.get('genderEnrichment'):
+                _filters=filters.copy()
+                _filters.update({"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":True},{"info__gender.isnull":True}]})
                 _={
                     "service": "data_enricher",
                     "ref_id": str(a.uuid),  
@@ -108,16 +88,9 @@ def handle_audience_creation(a,payload):
                         "data_source": [{
                         "type": "data_house",
                         "object_type": "profile",
-                        "internal_filters": {
-                            "info__gender.isnull": True, #// Example internal filter
-                            "info__country.isnull": True, #// Example internal filter
-                             #// Example internal filter
-                            #// ... more internal filters as needed ...
-                        },
-                        "external_filters": {
-                            "task.equal": str(task.uuid) #// Filter by audience (REQUIRED)
-                            #// ... more external filters as needed ...
-                        },
+                        "filters":_filters,
+                        "size":30,
+                       
                         
                         "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
                         }],
@@ -147,7 +120,11 @@ def handle_audience_creation(a,payload):
                 print(t)
                 t.save()
                 uuids.append([str(t.uuid)])
+            _filters={}
             if a.enrichment_configuration.get('userInfoEnrichment'):
+                _filters=filters.copy()
+                _filters.update({"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":False},{"info__gender.isnull":False}],"or_conditions":[{"info__posts_count.isnull":True},{"profile_picture.isnull":True}]})
+
                 _={
                     "service": a.service,
                     "ref_id": str(a.uuid),  
@@ -157,19 +134,8 @@ def handle_audience_creation(a,payload):
                         "data_source": [{
                         "type": "data_house",
                         "object_type": "profile",
-                        "internal_filters": {
-                            "info__followers_count.isnull": True, 
-                            "info__is_private":False
-                            #// Example internal filter
-                            #// Example internal filter
-                             #// Example internal filter
-                            #// ... more internal filters as needed ...
-                        },
-                        "external_filters": {
-                            "task.equal": str(task.uuid) #// Filter by audience (REQUIRED)
-                            #// ... more external filters as needed ...
-                        },
-                        
+                        "filters":_filters,
+                         "size":30,
                         "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
                         }],
                         
@@ -190,6 +156,9 @@ def handle_audience_creation(a,payload):
                 print(str(t.uuid))
                 uuids.append([str(t.uuid)])
             if a.enrichment_configuration.get('userPostsEnrichment'):
+                _filters=filters.copy()
+                _filters.update({"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":False},{"info__gender.isnull":False}],"or_conditions":[{"info__posts_count.isnull":True}]})
+
                 _={
                     "service": a.service,
                     "ref_id": str(a.uuid),  
@@ -200,19 +169,8 @@ def handle_audience_creation(a,payload):
                         "data_source": {
                         "type": "data_house",
                         "object_type": "profile",
-                        "internal_filters": {
-                            "info__is_private":False,
-                            "info__rest_id.isnull":False,
-                            "posts__count.isnull": False, #// Example internal filter
-                            #// Example internal filter
-                             #// Example internal filter
-                            #// ... more internal filters as needed ...
-                        },
-                        "external_filters": {
-                            "task.equal": str(task.uuid) #// Filter by audience (REQUIRED)
-                            #// ... more external filters as needed ...
-                        },
-                        
+                        "filters":filters,
+                         "size":30,
                         "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
                         },
                         
@@ -253,7 +211,7 @@ def handle_audience_creation(a,payload):
                                         }
                     
             _t=Task(**_)
-            _t.server=t.server 
+            _t.server=task.server 
             _t.save()        
             uuids.append([str(_t.uuid)])
     for uuid in uuids:

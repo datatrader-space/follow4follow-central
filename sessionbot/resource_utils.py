@@ -18,21 +18,26 @@ def create_resources_from_google_sheets(**kwargs):
     g.initialize_connection()
     print("i was initialized")
     resource_types = ["proxies", "bot", "servers", "devices"]
-    print(kwargs)
+
     if kwargs.get("spreadsheet_url"):
         g.spreadsheet_url = kwargs.get("spreadsheet_url")
         print("Spreadsheet URL:", kwargs["spreadsheet_url"])
 
     if kwargs.get("resource_type"):
         resource_types = [kwargs.get("resource_type")]
-
+        print(kwargs)
     request_id = kwargs.get("request_id")
     response = []
+    
     if g.open_google_sheet():
-        print(g.spreadsheet)
+        print(g.spreadsheet.__dict__)
         from sessionbot.models import SyncedSheet
-        s=SyncedSheet(spreadsheet_name=g.spreadsheet.title,google_spreadsheet_url=g.spreadsheet_url)
-        s.save()
+        try:
+            s=SyncedSheet(spreadsheet_name=g.spreadsheet.title,google_spreadsheet_url=g.spreadsheet_url)
+            s.save()
+        except Exception as e:
+            pass
+    print(resource_types)
     for resource_type in resource_types:
         print(f"Processing resource type: {resource_type}")
         g.open_google_sheet().find_worksheet(resource_type).read_worksheet()
@@ -41,15 +46,17 @@ def create_resources_from_google_sheets(**kwargs):
         print(f"Data read from worksheet: {data}")
 
         for row in data:
-            print(f"Processing row: {row}")
+         
             kwargs.update({"row": row})
             resp = None
-            if resource_type == "bot":
+            print(resource_type)
+            if resource_type == "bot" or resource_type=="profiles":
                 if not row.get("service"):
                     print("Service Not Found. Skipping bot. Add report here.")
                     continue
 
                 resp = bot(**row)
+                print(resp)
                 resp.update({"resource_type": "bot"})
                 resp.update({"request_id": request_id})
             elif resource_type == "email_providers":
@@ -162,7 +169,7 @@ def bot(**kwargs):
         c.save()
 
         _c = model_to_dict(c)
-        _c.pop("cookie")
+       
         _c.pop("created_on")
         resp = {
             "response": "success",
@@ -189,7 +196,7 @@ def bot(**kwargs):
         c.save()
 
         _c = model_to_dict(c)
-        _c.pop("cookie")
+      
         _c.pop("created_on")
 
         # Handle optional email provider
@@ -235,6 +242,7 @@ def bot(**kwargs):
 
 
     resp["logs"] = logs
+  
     return resp
 
 def email_provider(**kwargs):

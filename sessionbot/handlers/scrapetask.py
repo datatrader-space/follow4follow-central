@@ -62,7 +62,8 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 'max_threads':int(scrapetask.max_threads),
                 'max_requests_per_bot':scrapetask.max_requests_per_day,
                 'max_requests_per_day':200,
-                'max_requests_per_run':5
+                'max_requests_per_run':5,
+                'save_to_storage_house':True,
                 },   
                 'ref_id':scrapetask.uuid,
                 'paused':False if start_scraping else True,
@@ -166,3 +167,48 @@ def handle_scrapetask_form_from_frontend(task):
     _.update({'input':','.join(inputs)
                 })
     return _
+
+
+def handle_filter_creation_for_scrapetask(scrapetask):
+    filters={}
+    input='someval__location__posts','someval__user_followers','someval__'
+    location_ids=[]
+    usernames=[]
+    keywords=[]
+    print(scrapetask)
+    for input in scrapetask.input.split(','):
+            print(input)
+            if 'location' in input:
+                end_point='location'
+                if 'posts' in input:
+                    data_point='location_posts'
+                    filters['posts__location__rest_id.in']=[]
+                
+                location_ids.append(input.split('__')[1])
+            elif 'follower' in input:
+                end_point='user'
+                data_point='user_followers'
+                usernames.append(input.split('__')[1])
+            elif 'marketplace' in input:
+                end_point='marketplace'
+                data_point='search'
+            elif 'keyword' in input or 'keywords' in input:
+                end_point='search'
+                data_point='search_keyword'
+                keywords.append(input.split('__')[1])
+            elif 'hashtag' in input:
+                end_point='hashtag'
+                data_point='hastag_posts'
+                keywords.append(input.split('__')[1])
+            else:
+                continue
+            
+
+    if location_ids:
+        filters['posts__location__rest_id.in']=location_ids
+    if usernames:
+        filters['following__following__username.in']=usernames
+    if keywords:
+        filters['posts__text__content.contains']=keywords
+    print(filters)    
+    return filters

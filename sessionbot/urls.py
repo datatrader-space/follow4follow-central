@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
+from .views import task_actions,sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
 from django.urls import path, include
 from sessionbot.models import Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
 from rest_framework import routers, serializers, viewsets
@@ -95,6 +95,7 @@ class ProxySerializer(serializers.HyperlinkedModelSerializer):
     id = serializers.IntegerField(read_only=True)
     class Meta:
         model=Proxy
+        fields = '__all__'
         
 class ProxyViewSet(viewsets.ModelViewSet):
     queryset=Proxy.objects.all()
@@ -180,6 +181,7 @@ urlpatterns = [
     path('api/scrapetask/', scrape_task, name='scrape_task'),
     path('api/todo/', todo, name='todo_view'),
     path('api/logs/',log,name='logs'),
+    path('api/tasks/action/',task_actions,name='task_actions'),
     path('api/audience/',audience,name='audience')
 
 ]
