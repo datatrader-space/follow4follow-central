@@ -72,8 +72,9 @@ class Saver(object):
             try:
                 os.makedirs(pth)
             except Exception as e:
-                print(e)
-                print('add report here')
+                pass
+                #print(e)
+                #print('add report here')
             else:
                 pass
         self.block_address=pth
@@ -119,7 +120,8 @@ class Saver(object):
         block_address=self.block['address'].split('.')
         pth=self.data_directory
         if ',' in block_address:
-            print(block_address)
+            pass
+            #print(block_address)
         
         for module in block_address:
             pth=os.path.join(pth,module)
@@ -191,7 +193,7 @@ class Saver(object):
          
         if self.file is None:
             _={'traceback':traceback.format_exc(),'service':'Storage','type':'error','error':'file_not_open_erro','block_address':self.block_address,'file_path':self.file_path,'service':self.service,'datetime':dt.datetime.now()}
-            print(_)
+            #print(_)
             raise ValueError("File is not open.")    
       
         if self.block.get('data'):
@@ -231,11 +233,11 @@ class Saver(object):
             with pd.ExcelWriter(self.file_path, engine='openpyxl', mode='w') as writer:       
               self.file.to_excel(writer, index=False)
     def add_output_block_to_consumed_blocks_for_audience_for_session(self,session_id,audience_id,output_block):
-        self.block={'address':'audience.'+str(audience_id)+'.sessions.'+str(session_id)+'.consumed.blocks','file_name':output_block,'data':[]}
+        self.block={'address':'audience.'+str(audience_id)+'.'+str(session_id)+'.consumed.blocks','file_name':output_block,'data':[]}
         self.load_block()
         self.add_values_to_file(load_block=False)
     def get_consumed_blocks_for_audience_for_session(self,session_id,audience_id):
-        self.block={'address':'audience.'+str(audience_id)+'.sessions.'+str(session_id)+'.consumed.blocks'}
+        self.block={'address':'audience.'+str(audience_id)+'.'+str(session_id)+'.consumed.blocks'}
         self.load_block()
         resp=[]
         for block in os.listdir(self.block_address):
@@ -245,15 +247,46 @@ class Saver(object):
         self.block={'address':'audience.'+str(id),'file_name':str(uuid.uuid1()),'data':data}
         self.load_block()
         self.add_values_to_file(load_block=True)
-    def retrieve_audience_outputs(self,id,exclude_blocks,keys=False):
-        self.block={'address':'audience.'+str(id),'file_name':str(uuid.uuid1())}
+    def save_audience_outputs_for_session(self,session_id,audience_id,data):
+        self.block={'address':'audience.'+str(audience_id)+'.'+session_id,'file_name':str(uuid.uuid1()),'data':data}
         self.load_block()
-        print(self.block_address)
+        self.add_values_to_file(load_block=True)
+    def retrieve_audience_outputs_for_session(self,session_id,audience_id,exclude_blocks=[],keys=False,size=False):
+        self.block={'address':'audience.'+str(audience_id)+'.'+session_id}
+        self.load_block()
+  
         if keys:
             outputs={}
         else:
             outputs=[]
         for output in os.listdir(self.block_address):
+            if output.split('.')[0] in exclude_blocks:
+                continue
+            if size:
+                if len(outputs)>=size:
+                    return outputs
+            self.block.update({'file_name':output.split('.')[0]})
+            self.open_file()
+    
+            if not self.data_frame.empty:
+                if keys:
+                    outputs.update({output.split('.')[0]:self.data_frame.to_dict(orient='records')})
+                else:
+                    outputs.extend(self.data_frame.to_dict(orient='records'))
+      
+        return outputs if len(outputs)>0 else False
+    def retrieve_audience_outputs(self,id,exclude_blocks,keys=False,size=False):
+        self.block={'address':'audience.'+str(id),'file_name':str(uuid.uuid1())}
+        self.load_block()
+       
+        if keys:
+            outputs={}
+        else:
+            outputs=[]
+        for output in os.listdir(self.block_address):
+            if size:
+                if len(outputs)>=size:
+                    return outputs
             if output.split('.')[0] in exclude_blocks:
                 continue
             self.block.update({'file_name':output.split('.')[0]})

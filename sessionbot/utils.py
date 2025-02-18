@@ -53,13 +53,13 @@ class DataHouseClient:
         self.request_maker=requests
         
 
-    def retrieve(self, object_type, filters={}, locking_filters=None, lock_results=False, ref_id=None, **kwargs):
+    def retrieve(self, object_type, filters={}, required_fields=[],locking_filters=None, lock_results=False, ref_id=None, **kwargs):
         url = f"{self.base_url}datahouse/api/provide/"  # Construct the URL
 
         payload = {
             "object_type":object_type,
             "filters":filters,           
-            "ref_id": ref_id or str(uuid.uuid4()) # Generate ref_id if not provided
+           
         }
         
 

@@ -173,70 +173,88 @@ def audience(request):
             data=data.get('data')
             audience_id=data.get('ids')[0]
             session_id=data.get('session_id')
-            print(audience_id)
-            from sessionbot.utils import DataHouseClient
-            from django.conf import settings
-            from sessionbot.models import Audience,Task
-            d=DataHouseClient()
-            a=Audience.objects.all().filter(id=audience_id)
-            print(a)
-            if a:
-                a=a[0]
-                a.scrape_tasks
-                
-
-                    
-                
-                tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True)))
-                #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
-            print(tasks)
-            filters={'tasks__uuid.in':list(tasks),'info__rest_id.isnull':False}
-            filters={'following__following__username.in':['smiirl']}
-            filters={'posts__text__content.contains':'lahore'}
-            resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False)
-            results=[]
-            resp=json.loads(resp)
-            for row in resp['data']:
-                if row.get('profile_picture'):
-                    url=settings.STORAGE_HOUSE_URL+row['profile_picture']
-                    import urllib
-                    import re
-                    cleaned_url = url.replace("\\", "/")
-
-                    # 2. Parse the URL to handle encoding issues
-                    parsed_url = urllib.parse.urlparse(cleaned_url)
-
-                    # 3. Reconstruct the URL with proper encoding
-                    cleaned_url = urllib.parse.urlunparse(parsed_url)
-                    cleaned_url = re.sub(r"(?<!:)/{2,}", "/", cleaned_url)
-                    print(url)
-                    print(cleaned_url)
-                    row['profile_picture']=cleaned_url
-                results.append(row)
-            
-            return JsonResponse({'status': 'success','data':resp['data']}, status=200) 
             from sessionbot.saver import Saver
             s=Saver()
+            print(session_id)
             exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
-            resp=s.retrieve_audience_outputs(audience_id,exclude_blocks=exclude_blocks,keys=True)
-            print(audience_id)
-            serve=[]
-            for key,value in resp.items():
-                print('Request recieve')
-                if len(value)==1:
-                    serve.append(value[0])
-                    value[0].pop('profile_pic',False)
-                    value[0].pop('full_name',False)
-                else:
-                    for row in value:
-                        serve.append(row)
-                        row.pop('profile_pic',False)
-                        row.pop('full_name',False)
-                s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)
-                if len(serve)>=50:
-                    print(serve)
-                    return JsonResponse({'status': 'success','data':serve}, status=200) 
-            return JsonResponse({'status': 'success','data':serve}, status=200)                              
+            resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,exclude_blocks=exclude_blocks,keys=True,size=50)
+            print(resp)
+            if not resp:           
+                from sessionbot.utils import DataHouseClient
+                from django.conf import settings
+                from sessionbot.models import Audience,Task
+                d=DataHouseClient()
+                a=Audience.objects.all().filter(id=audience_id)
+                print(a)
+                if a:
+                    a=a[0]
+                    a.scrape_tasks                
+                    tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True)))
+                    #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
+                print(tasks)
+                filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),'info__rest_id.isnull':False}        
+                required_fields=['username','info__full_name','info__gender','info__country','info__followers_count','profile_picture']     
+                resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False)
+                
+                results=[]
+                resp=json.loads(resp)
+                print(resp['data'][0])
+                unique_usernames=[]
+                for row in resp['data']:
+                    if row['username'] in unique_usernames:
+                            continue
+                    else:
+                        if row.get('profile_picture'):
+                            
+                            url=settings.STORAGE_HOUSE_URL+row['profile_picture']
+                            import urllib
+                            import re
+                            cleaned_url = url.replace("\\", "/")
+                            # 2. Parse the URL to handle encoding issues
+                            parsed_url = urllib.parse.urlparse(cleaned_url)
+                            # 3. Reconstruct the URL with proper encoding
+                            cleaned_url = urllib.parse.urlunparse(parsed_url)
+                            cleaned_url = re.sub(r"(?<!:)/{2,}", "/", cleaned_url)              
+                            row['profile_picture']=cleaned_url
+                        unique_usernames.append(row['username'])             
+                        results.append(row)
+                for i in range(0, len(results), 50):
+                    chunk = results[i:i + 50]
+                    s.save_audience_outputs_for_session(session_id=session_id,audience_id=audience_id,data=chunk)
+                resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,size=50,keys=True)   
+                results=[]
+                for key,value in resp.items():          
+                    if len(results)>=50:
+                        break          
+                    s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)  
+                    results.extend(value)
+                
+                return JsonResponse({'status': 'success','data':results}, status=200) 
+            else:
+                exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
+                resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,size=50,keys=True,exclude_blocks=exclude_blocks) 
+                serve=[]
+                for key,value in resp.items():
+                    if len(serve)>=50:
+                        break
+                    print('Request recieve')
+                    if len(value)==1:
+                        serve.append(value[0])
+                        value[0].pop('profile_pic',False)
+                        value[0].pop('full_name',False)
+                    else:
+                        for row in value:
+                            serve.append(row)
+                            row.pop('profile_pic',False)
+                            row.pop('full_name',False)
+                        
+                    s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)
+                    
+                        
+
+                print(session_id)
+                print(serve[0])
+                return JsonResponse({'status': 'success','data':serve}, status=200)                              
                                     
 
         elif method=='save':
