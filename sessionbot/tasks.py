@@ -273,4 +273,96 @@ def send_comand_to_instance(instance_id, data, model_config=None):
         task_model.save()
 
     return result
-
+@shared_task()
+def analyze_and_create_update_metrics_for_bots():
+    from django.db.models import Q
+    for bot in ChildBot.objects.all().filter(service='instagram'):
+        print(bot.username)
+        tasks=Task.objects.all().filter(profile=bot.username).filter(service=bot.service)
+        scraping_tasks=tasks.filter(interact=False)
+        automation_tasks=tasks.filter(interact=True)
+        login_tasks=tasks.filter(Q(data_point='login')|Q(data_point='open_browser_profile'))
+        from sessionbot.utils import DataHouseClient
+        d=DataHouseClient()
+        if len(scraping_tasks.filter(paused=False))>0:
+            bot.is_scraper=True
+        print(list(tasks.values_list('uuid',flat=True)))
+        failed_login_logs_with_datetime=d.retrieve(object_type='log',filters={'task__uuid.in':list(tasks.values_list('uuid',flat=True)),'type.equal':'failed_login'},required_fields=['datetime','bot_username','type'])
+        print(failed_login_logs_with_datetime)
+        sucessful_login_logs_with_datetime=d.retrieve(object_type='log',filters={'task__uuid.in':list(tasks.values_list('uuid',flat=True)),'type.equal':'successful_login'},required_fields=['datetime','bot_username','type'])
+        print(sucessful_login_logs_with_datetime)
+        import pandas as pd
+        df1=pd.DataFrame(data=failed_login_logs_with_datetime['data'])
+        df2=pd.DataFrame(data=sucessful_login_logs_with_datetime['data'])
+  
+        if df1.empty and not df2.empty:
+            bot.logged_in=True
+            bot.save()
+        elif df2.empty and not df1.empty:
+            bot.logged_in=False
+            bot.save()
+        elif df1.empty and df2.empty:
+            pass
+        else:
+            latest_fail = pd.to_datetime(df1['datetime'], errors='coerce').max()
+            latest_success = pd.to_datetime(df2['datetime'], errors='coerce').max()
+            if pd.isnull(latest_fail) and not(pd.isnull(latest_success)):
+                bot.logged_in=True
+                bot.save()
+            elif pd.isnull(latest_success) and not (pd.isnull(latest_fail)):
+                bot.logged_in=False
+                bot.save()
+            elif pd.isnull(latest_fail):
+                bot.logged_in=True
+            elif pd.isnull(latest_success):
+                bot.logged_in=False
+            elif latest_fail > latest_success:
+                bot.logged_in=False
+            else:
+                bot.logged_in=True
+            bot.save()
+        scraped_so_far_by_bot_payload = {
+        "object_type": "profile",  # Replace with your object type
+        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True))}, # Correct sum syntax
+       
+         "count":True # Optional
+}       
+        scraped_so_far=d.retrieve(**scraped_so_far_by_bot_payload)
+        if type(scraped_so_far)==dict:
+            bot.scraped_so_far=scraped_so_far.get('count',0)
+            bot.save()
+        successful_api_requests= {
+        "object_type": "requestlog",  # Replace with your object type
+        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[200]}, # Correct sum syntax
+       
+         "count":True # Optional
+}   
+        successful_api_requests=d.retrieve(**successful_api_requests)
+        if type(successful_api_requests)==dict:
+            bot.successful_api_requests=successful_api_requests['count']
+            bot.save()
+        failed_api_requests= {
+        "object_type": "requestlog",  # Replace with your object type
+        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[400,500,401]}, # Correct sum syntax
+       
+         "count":True # Optional
+}   
+        failed_api_requests=d.retrieve(**failed_api_requests)
+        if type(failed_api_requests)==dict:
+            bot.failed_api_requests=failed_api_requests['count']
+            bot.save()
+        block_api_requests= {
+        "object_type": "requestlog",  # Replace with your object type
+        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"data__status":"fail"}, # Correct sum syntax
+        
+         "count":True # Optional
+}   
+        block_api_requests=d.retrieve(**block_api_requests)
+        if type(block_api_requests)==dict:
+            if block_api_requests.get('count',0)>0:
+                
+                bot.is_challenged=True 
+            else:
+                bot.is_challenged=False
+     
+        pass

@@ -451,7 +451,13 @@ class ChildBot(BaseModel):
     )
     
     challenged = models.BooleanField(default=False, help_text="Indicates if the bot is currently challenged.")
-
+    logged_in = models.BooleanField(default=False)
+    is_challenged = models.BooleanField(default=False)
+    is_scraper = models.BooleanField(default=False)
+    scraped_so_far = models.IntegerField(default=0)
+    interactions_so_far = models.IntegerField(default=0)
+    successful_api_requests = models.IntegerField(default=0)
+    failed_api_requests = models.IntegerField(default=0)
 
     class Meta:
         unique_together = ('customer', 'username')

@@ -53,23 +53,27 @@ class DataHouseClient:
         self.request_maker=requests
         
 
-    def retrieve(self, object_type, filters={}, required_fields=[],locking_filters=None, lock_results=False, ref_id=None, **kwargs):
+    def retrieve(self, object_type, filters={}, required_fields=[],count=False,locking_filters=None, lock_results=False, ref_id=None, **kwargs):
         url = f"{self.base_url}datahouse/api/provide/"  # Construct the URL
 
         payload = {
             "object_type":object_type,
-            "filters":filters,           
+            "filters":filters,
+            "required_fields":required_fields ,
+            "count":count         
            
         }
         
 
         try:
             response = self.request_maker.post(url=url,json=payload) 
-            return response.text
+            return json.loads(response.text)
             
 
         except Exception as e:
+            
             print(f"Error in provide: {e}")
+            return response.text
             return None  # Or raise the exception if you prefer
 
     def consume(self, payload):
