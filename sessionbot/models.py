@@ -779,7 +779,13 @@ class ScrapeTask(BaseModel):
     max_threads=models.IntegerField(default=5)
     max_requests_per_day=models.IntegerField(default=100)
     uuid=models.UUIDField(unique=True,blank=True,null=True)
-
+    requests_sent = models.IntegerField(default=0)
+    media_downloaded = models.IntegerField(default=0)
+    media_stored = models.IntegerField(default=0)
+    failed_request_count = models.IntegerField(default=0)
+    successful_request_count = models.IntegerField(default=0)
+    scraped_so_far=models.IntegerField(default=0)
+    bot_status=models.JSONField(blank=True,null=True,default={})
     def __str__(self):
         return self.name
     

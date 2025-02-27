@@ -197,7 +197,7 @@ def audience(request):
                 resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False)
                 
                 results=[]
-                resp=json.loads(resp)
+                
                 print(resp['data'][0])
                 unique_usernames=[]
                 for row in resp['data']:

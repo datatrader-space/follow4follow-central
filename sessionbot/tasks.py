@@ -277,6 +277,11 @@ def send_comand_to_instance(instance_id, data, model_config=None):
 def analyze_and_create_update_metrics_for_bots():
     from django.db.models import Q
     for bot in ChildBot.objects.all().filter(service='instagram'):
+        scraped_so_far=0
+        successful_api_requests=0
+        block_api_requests=0
+        failed_api_requests=0
+        scraped_so_far=0
         print(bot.username)
         tasks=Task.objects.all().filter(profile=bot.username).filter(service=bot.service)
         scraping_tasks=tasks.filter(interact=False)
@@ -333,7 +338,7 @@ def analyze_and_create_update_metrics_for_bots():
             bot.save()
         successful_api_requests= {
         "object_type": "requestlog",  # Replace with your object type
-        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[200]}, # Correct sum syntax
+        "filters": {"task__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[200]}, # Correct sum syntax
        
          "count":True # Optional
 }   
@@ -343,7 +348,7 @@ def analyze_and_create_update_metrics_for_bots():
             bot.save()
         failed_api_requests= {
         "object_type": "requestlog",  # Replace with your object type
-        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[400,500,401]}, # Correct sum syntax
+        "filters": {"task__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[400,500,401]}, # Correct sum syntax
        
          "count":True # Optional
 }   
@@ -353,7 +358,7 @@ def analyze_and_create_update_metrics_for_bots():
             bot.save()
         block_api_requests= {
         "object_type": "requestlog",  # Replace with your object type
-        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"data__status":"fail"}, # Correct sum syntax
+        "filters": {"task__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"data__status":"fail"}, # Correct sum syntax
         
          "count":True # Optional
 }   
@@ -364,5 +369,24 @@ def analyze_and_create_update_metrics_for_bots():
                 bot.is_challenged=True 
             else:
                 bot.is_challenged=False
-     
+
+    for scrapetask in ScrapeTask.objects.all():
+        successful_api_requests=0
+        failed_api_requests=0
+        blocks_encountered=0
+        scraped_so_far=0
+        bot_status={}
+        for bot in scrapetask.childbots.all():
+         
+            scraped_so_far+=bot.scraped_so_far
+            failed_api_requests+=bot.failed_api_requests
+            successful_api_requests+=bot.successful_api_requests
+            bot_status.update({bot.username+'_is_challenged':bot.is_challenged})
+      
+        scrapetask.successful_request_count=successful_api_requests
+        scrapetask.failed_request_count=failed_api_requests
+        scrapetask.scraped_so_far=scraped_so_far
+        scrapetask.requests_sent=successful_api_requests+failed_api_requests
+        scrapetask.bot_status=bot_status
+        scrapetask.save()
         pass
