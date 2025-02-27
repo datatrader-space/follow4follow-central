@@ -369,6 +369,7 @@ def analyze_and_create_update_metrics_for_bots():
                 bot.is_challenged=True 
             else:
                 bot.is_challenged=False
+            bot.save()
 
     for scrapetask in ScrapeTask.objects.all():
         successful_api_requests=0
