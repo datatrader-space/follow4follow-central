@@ -76,14 +76,120 @@ def handle_audience_creation(a,payload):
 
             
             print(a.uuid)
-            if a.enrichment_configuration.get('nationalityEnrichment') or a.enrichment_configuration.get('genderEnrichment'):
-                _filters=filters.copy()
-                _filters.update({"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":True},{"info__gender.isnull":True}]})
+            
+            _filters={}
+            if a.enrichment_configuration.get('userInfoEnrichment'):
+             
+                _filters.update({"tasks__uuid.in":[task.uuid],"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":False},{"info__gender.isnull":False}],"or_conditions":[{"info__posts_count.isnull":True},{"profile_picture.isnull":True}]})
+
+                _={
+                    "service": a.service,
+                    "ref_id": str(a.uuid),  
+                    "end_point": "user",
+                    "data_point": "user_info",
+                    "profile":task.profile,
+                    "add_data": {
+                        "data_source": [{
+                        "type": "data_house",
+                        "object_type": "profile",
+                        
+                        "filters":_filters,
+                         "size":30,
+                        "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
+                        }],
+                        
+                        #"save_to_googlesheet": False, #// Save to Google Sheets?
+                        #"spreadsheet_url": "your_spreadsheet_url", #// Google Sheet URL
+                        #"worksheet_name": "your_worksheet_name" #// Worksheet name
+                        #// ... other enrichment parameters ...
+                    },
+                    "repeat": True, #// Repeat the task?
+                    "repeat_duration": "1m", #// Repeat duration (e.g., "1m", "1h", "1d")
+                    "uuid": str(uuid.uuid1()) #// Unique task ID (optional, auto-generated if absent)
+                    }
+                print(_)
+                t=Task(**_)
+                t.server=task.server
+                
+                t.save()
+                print(str(t.uuid))
+                uuids.append([str(t.uuid)])
+            if a.enrichment_configuration.get('userPostsEnrichment'):
+                
+                _filters={"tasks__uuid.in":[t.uuid],"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":False},{"info__gender.isnull":False}],"or_conditions":[{"posts.lte":0}]}
+
+                _={
+                    "service": a.service,
+                    "ref_id": str(a.uuid),  
+                    "end_point": "user",
+                    "data_point": "user_posts",
+                    "profile":task.profile,
+                    "add_data": {
+                        "data_source": {
+                        "type": "data_house",
+                        "object_type": "profile",
+                        "filters":_filters,
+                         "size":30,
+                        "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
+                        },
+                        
+                        #"save_to_googlesheet": False, #// Save to Google Sheets?
+                        #"spreadsheet_url": "your_spreadsheet_url", #// Google Sheet URL
+                        #"worksheet_name": "your_worksheet_name" #// Worksheet name
+                        #// ... other enrichment parameters ...
+                    },
+                    "repeat": True, #// Repeat the task?
+                    "repeat_duration": "1m", #// Repeat duration (e.g., "1m", "1h", "1d")
+                    "uuid": str(uuid.uuid1()) #// Unique task ID (optional, auto-generated if absent)
+                    }      
+                t=Task(**_)
+                t.server=task.server
+                
+                t.save()  
+                uuids.append([str(t.uuid)])      
+                if a.enrichment_configuration.get('nationalityEnrichment') or a.enrichment_configuration.get('genderEnrichment'):
+                
+                    _filters={"tasks__uuid.in":[t.uuid],"service.equal":s.service, "posts.get":3,"info__is_private":False,"or_conditions":[{"info__country.isnull":True},{"info__gender.isnull":True}]}
+                    _={
+                        "service": "data_enricher",
+                        "ref_id": str(a.uuid),  
+                        "end_point": "enrich",
+                        "data_point": "enrich_social_media_profile",
+                        "add_data": {
+                            "data_source": [{
+                            "type": "data_house",
+                            "object_type": "profile",
+                            "filters":_filters,
+                            "size":30,
+                        
+                            
+                            "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
+                            }],
+                            'service':'openai',
+                            
+                            #"save_to_googlesheet": False, #// Save to Google Sheets?
+                            #"spreadsheet_url": "your_spreadsheet_url", #// Google Sheet URL
+                            #"worksheet_name": "your_worksheet_name" #// Worksheet name
+                            #// ... other enrichment parameters ...
+                        },
+                        "repeat": True, #// Repeat the task?
+                        "repeat_duration": "1m", #// Repeat duration (e.g., "1m", "1h", "1d")
+                        "uuid": str(uuid.uuid1()) #// Unique task ID (optional, auto-generated if absent)
+                        }
+                print(_)
+                t=Task(**_)
+                t.server=task.server
+                print(t)
+                t.save()
+                uuids.append([str(t.uuid)])
+                """  if a.enrichment_configuration.get('nationalityEnrichment') or a.enrichment_configuration.get('genderEnrichment'):
+                
+                _filters={"tasks__uuid.in":[t.uuid],"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":True},{"info__gender.isnull":True}]}
                 _={
                     "service": "data_enricher",
                     "ref_id": str(a.uuid),  
                     "end_point": "enrich",
-                    "data_point": "enrich",
+                    "data_point": "enrich_social_media_profile",
                     "add_data": {
                         "data_source": [{
                         "type": "data_house",
@@ -119,76 +225,7 @@ def handle_audience_creation(a,payload):
                 t.server=task.server
                 print(t)
                 t.save()
-                uuids.append([str(t.uuid)])
-            _filters={}
-            if a.enrichment_configuration.get('userInfoEnrichment'):
-                _filters=filters.copy()
-                _filters.update({"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":False},{"info__gender.isnull":False}],"or_conditions":[{"info__posts_count.isnull":True},{"profile_picture.isnull":True}]})
-
-                _={
-                    "service": a.service,
-                    "ref_id": str(a.uuid),  
-                    "end_point": "user",
-                    "data_point": "user_info",
-                    "add_data": {
-                        "data_source": [{
-                        "type": "data_house",
-                        "object_type": "profile",
-                        "filters":_filters,
-                         "size":30,
-                        "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
-                        }],
-                        
-                        #"save_to_googlesheet": False, #// Save to Google Sheets?
-                        #"spreadsheet_url": "your_spreadsheet_url", #// Google Sheet URL
-                        #"worksheet_name": "your_worksheet_name" #// Worksheet name
-                        #// ... other enrichment parameters ...
-                    },
-                    "repeat": True, #// Repeat the task?
-                    "repeat_duration": "1m", #// Repeat duration (e.g., "1m", "1h", "1d")
-                    "uuid": str(uuid.uuid1()) #// Unique task ID (optional, auto-generated if absent)
-                    }
-                print(_)
-                t=Task(**_)
-                t.server=task.server
-                
-                t.save()
-                print(str(t.uuid))
-                uuids.append([str(t.uuid)])
-            if a.enrichment_configuration.get('userPostsEnrichment'):
-                _filters=filters.copy()
-                _filters.update({"service.equal":s.service,"info__is_private":False,"or_conditions":[{"info__country.isnull":False},{"info__gender.isnull":False}],"or_conditions":[{"info__posts_count.isnull":True}]})
-
-                _={
-                    "service": a.service,
-                    "ref_id": str(a.uuid),  
-                    "end_point": "user",
-                    "data_point": "user_posts",
-                    "profile":task.profile,
-                    "add_data": {
-                        "data_source": {
-                        "type": "data_house",
-                        "object_type": "profile",
-                        "filters":filters,
-                         "size":30,
-                        "lock_results": True #// Signal to lock the results for the audience (REQUIRED)
-                        },
-                        
-                        #"save_to_googlesheet": False, #// Save to Google Sheets?
-                        #"spreadsheet_url": "your_spreadsheet_url", #// Google Sheet URL
-                        #"worksheet_name": "your_worksheet_name" #// Worksheet name
-                        #// ... other enrichment parameters ...
-                    },
-                    "repeat": True, #// Repeat the task?
-                    "repeat_duration": "1m", #// Repeat duration (e.g., "1m", "1h", "1d")
-                    "uuid": str(uuid.uuid1()) #// Unique task ID (optional, auto-generated if absent)
-                    }      
-                t=Task(**_)
-                t.server=task.server
-                
-                t.save()  
-                uuids.append([str(t.uuid)])      
-            
+                uuids.append([str(t.uuid)]) """
             _={'service':'datahouse',
                         'ref_id':str(a.uuid),
                         'end_point':"update",

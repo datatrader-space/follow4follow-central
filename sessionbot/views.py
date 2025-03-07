@@ -177,8 +177,9 @@ def audience(request):
             s=Saver()
             print(session_id)
             exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
-            resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,exclude_blocks=exclude_blocks,keys=True,size=50)
+            resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,keys=True,size=50)
             print(resp)
+            print('audience has data')
             if not resp:           
                 from sessionbot.utils import DataHouseClient
                 from django.conf import settings
@@ -192,7 +193,7 @@ def audience(request):
                     tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True)))
                     #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
                 print(tasks)
-                filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),'info__rest_id.isnull':False}        
+                filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),'info__rest_id.isnull':False,'info__followers_count.gte':1}        
                 required_fields=['username','info__full_name','info__gender','info__country','info__followers_count','profile_picture']     
                 resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False)
                 
@@ -233,6 +234,8 @@ def audience(request):
             else:
                 exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
                 resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,size=50,keys=True,exclude_blocks=exclude_blocks) 
+                if not resp:
+                    return JsonResponse({'status': 'success','data':[]}, status=200) 
                 serve=[]
                 for key,value in resp.items():
                     if len(serve)>=50:

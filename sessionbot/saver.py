@@ -254,7 +254,7 @@ class Saver(object):
     def retrieve_audience_outputs_for_session(self,session_id,audience_id,exclude_blocks=[],keys=False,size=False):
         self.block={'address':'audience.'+str(audience_id)+'.'+session_id}
         self.load_block()
-  
+        print(self.block_address)
         if keys:
             outputs={}
         else:
