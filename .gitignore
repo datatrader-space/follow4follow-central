@@ -1,5 +1,5 @@
 crawler/
 
 
-/venv/*
+venv
 /data/*
