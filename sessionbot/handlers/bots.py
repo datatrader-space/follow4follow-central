@@ -27,7 +27,7 @@ def formatify_for_server(bot):
        _bot.pop('customer')
        _bot.pop('bio')
        _bot.pop('failed_api_requests')
-       _bot.pop('challenged')
+       
        _bot.pop('logged_in')
        _bot.pop('is_challenged')
        _bot.pop('is_scraper')
