@@ -1,5 +1,5 @@
 crawler/
 
-data/media/
-venv/
-data/
+
+/venv/*
+/data/*
