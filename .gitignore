@@ -1,27 +1,5 @@
 crawler/
 
 data/media/
-<<<<<<< HEAD
-media/
-reports/
-services/facebook
-venv/
-deep_stuff/workflows
-deep_stuff/payloads
-sessionbot/migrations
-db.sqlite3
-resources/
-resources/
-.env
-=======
-
-services/facebook
-venv/
-
-db.sqlite3
-resources
-resources
-
->>>>>>> 3240ebebf9b37cd0dc48c140df5c4afcb4464987
-db
-sessionbot/data/
+venv
+data

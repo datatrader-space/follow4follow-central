@@ -34,7 +34,7 @@ def formatify_for_server(bot):
        _bot.pop('scraped_so_far')
        _bot.pop('interactions_so_far')
        _bot.pop('successful_api_requests')
-       _bot.pop('failed_api_requests')
+       
               
        _bot["device"] = bot.device.serial_number if bot.device else False
        _bot.pop('email_provider')
