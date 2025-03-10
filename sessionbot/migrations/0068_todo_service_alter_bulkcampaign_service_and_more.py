@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='todo',
             name='service',
-            field=models.CharField(choices=[('instagram', 'Instagram'), ('attendance', 'attendance'), ('twitter', 'twitter'), ('tiktok', 'tiktok'), ('cleaner', 'cleaner')], default='instagram'),
+            field=models.CharField(choices=[('instagram', 'Instagram'), ('attendance', 'attendance'), ('twitter', 'twitter'), ('tiktok', 'tiktok'), ('cleaner', 'cleaner')], default='instagram',max_length=500),
         ),
         migrations.AlterField(
             model_name='bulkcampaign',
