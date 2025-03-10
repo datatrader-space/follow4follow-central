@@ -22,11 +22,11 @@ def formatify_for_server(bot):
        _bot.pop('first_name')
        _bot.pop('last_name')
        _bot.pop('state')
-       _bot.pop('challenged')
+    
        _bot.pop('logged_in_on_servers')
        _bot.pop('customer')
        _bot.pop('bio')
-       _bot.pop('failed_api_requests')
+    
        
        _bot.pop('logged_in')
        _bot.pop('is_challenged')
