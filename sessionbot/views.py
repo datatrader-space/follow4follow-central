@@ -193,7 +193,7 @@ def audience(request):
                     tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True)))
                     #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
                 print(tasks)
-                filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),'info__rest_id.isnull':False,'info__followers_count.gte':1}        
+                filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),'rest_id.isnull':False,'followers_count.isnull':False}        
                 required_fields=['username','info__full_name','info__gender','info__country','info__followers_count','profile_picture']     
                 resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False)
                 
