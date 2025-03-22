@@ -610,8 +610,7 @@ def todo(request):
             data=data.get('data')
             if data.get('ids'):
                 for _id in data.get('ids',[]):
-                    obj=Todo.objects.all().filter(id=_id)
-                    
+                    obj=Todo.objects.all().filter(id=_id)                 
                     if obj:
                         obj=obj[0]
                         res=model_to_dict(obj)
@@ -641,7 +640,10 @@ def todo(request):
 
                 
                 if method == 'create':                     
-                       
+                    if task['repeat_after']:
+                        task['repeat_after']=int(task['repeat_after'])
+                    else:
+                        task.pop('repeat_after',False)  
                     if Todo.objects.filter(name=task.get('name')):
                         print('Dup')
                         l=Log(end_point='todo',label='ERROR',message='A TODO with the same name exists, Either Edit existing TODO or create new with similar name')

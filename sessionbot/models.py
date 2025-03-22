@@ -1817,11 +1817,12 @@ s={
     'required': ['country_slug','city_id']
 }
 class Todo(BaseModel):
+    uuid=models.UUIDField(blank=True,null=True,max_length=500,unique=True)
     service=models.CharField(choices=SERVICES,blank=False,null=False,default='instagram',max_length=500)
     name = models.CharField(max_length=255)
     #os=models.CharField(choices=(('android','android'),('browser','browser')))
     caption = models.TextField(blank=True)
-    
+    type=models.CharField(choices=(('post','Post'),('edit_profile','edit_profile')),max_length=500,default='post')
     target_location=JSONField(schema=s,
             #choices=ACTIVITY_CHOICES,
             #max_length=1000,
