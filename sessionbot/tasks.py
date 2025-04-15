@@ -391,3 +391,317 @@ def analyze_and_create_update_metrics_for_bots():
         scrapetask.bot_status=bot_status
         scrapetask.save()
         pass
+
+
+
+from celery import shared_task
+import requests
+import datetime
+from .models import Server, Event, Heartbeat, ResourceUsage
+from django.conf import settings
+from django.core.mail import send_mail
+
+@shared_task
+def collect_system_status():
+    servers = Server.objects.filter(poll_for_status=True)  # Only poll servers marked for polling
+
+    for server in servers:
+        status_url = f"http://{server.ip_address}/api/monitor/system-status/"
+
+        try:
+            response = requests.get(status_url)
+            response.raise_for_status()
+            status_data = response.json()
+            timestamp = status_data.get('timestamp')
+            heartbeat_data = status_data.get('heartbeat', {})
+            resource_data = status_data.get('resources', {})
+
+            if timestamp:
+                Event.objects.create(
+                    server=server,
+                    event_type='heartbeat',
+                    timestamp=timestamp,
+                    payload={'timestamp': timestamp, **heartbeat_data}
+                )
+                Event.objects.create(
+                    server=server,
+                    event_type='resource',
+                    timestamp=timestamp,
+                    payload={'timestamp': timestamp, **resource_data}
+                )
+                print(f"[{datetime.datetime.now()}] System status collected from {server.name} at {timestamp}")
+            else:
+                print(f"[{datetime.datetime.now()}] Timestamp missing in response from {server.name}")
+
+        except requests.exceptions.RequestException as e:
+            print(f"[{datetime.datetime.now()}] Error collecting system status from {server.name}: {e}")
+        except ValueError:
+            print(f"[{datetime.datetime.now()}] Error decoding JSON from {server.name}")
+
+@shared_task
+def process_event_for_servers(event_id):
+   
+    try:
+        event = Event.objects.get(id=event_id)
+
+        if event.event_type == 'heartbeat':
+            timestamp_str = event.payload.get('timestamp')
+            if timestamp_str:
+                    # Assuming the client sends the timestamp as a string,
+                    # parse it and make it UTC-aware
+                    naive_dt = datetime.datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    utc_aware_dt = timezone.make_aware(naive_dt, timezone=timezone.utc)
+            else:
+                utc_aware_dt = timezone.now()  # Or handle the missing timestamp appropriately
+
+            Heartbeat.objects.create(
+                server=event.server,
+                timestamp=utc_aware_dt,
+                hostname=event.payload.get('hostname'),
+                os=event.payload.get('os'),
+            )
+        elif event.event_type == 'resource':
+            ResourceUsage.objects.create(
+                server=event.server,
+                timestamp=event.timestamp,
+                cpu_percent=event.payload.get('cpu_percent'),
+                memory_percent=event.payload.get('memory_percent'),
+                disk_percent=event.payload.get('disk_percent'),
+                received_at=event.received_at
+            )
+    except Event.DoesNotExist:
+        print(f"Event with ID {event_id} not found.")
+    except Exception as e:
+        print(f"Error processing event for models {event_id}: {e}")
+
+@shared_task
+def check_resource_alerts():
+    now = datetime.datetime.now()
+    latest_resources = ResourceUsage.objects.filter(
+        received_at__gte=now - datetime.timedelta(minutes=5)  # Check recent events
+    ).order_by('server', '-received_at').distinct('server')
+
+    CPU_THRESHOLD_PERCENT = settings.CPU_THRESHOLD_PERCENT
+    MEMORY_THRESHOLD_PERCENT = settings.MEMORY_THRESHOLD_PERCENT
+    DISK_THRESHOLD_PERCENT = settings.DISK_THRESHOLD_PERCENT
+    ALERT_RECIPIENTS = settings.ALERT_RECIPIENTS
+    ALERT_SUBJECT_PREFIX = settings.ALERT_SUBJECT_PREFIX
+    SMTP_SERVER = settings.EMAIL_HOST
+    SMTP_PORT = settings.EMAIL_PORT
+    SMTP_USERNAME = settings.EMAIL_HOST_USER
+    SMTP_PASSWORD = settings.EMAIL_HOST_PASSWORD
+
+    for resource in latest_resources:
+        if resource.cpu_percent is not None and resource.cpu_percent > CPU_THRESHOLD_PERCENT:
+            send_alert_email.delay("CPU Usage Alert", f"[{resource.timestamp}] High CPU on {resource.server.name}: {resource.cpu_percent}%", ALERT_RECIPIENTS, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD)
+
+        if resource.memory_percent is not None and resource.memory_percent > MEMORY_THRESHOLD_PERCENT:
+            send_alert_email.delay("Memory Usage Alert", f"[{resource.timestamp}] High Memory on {resource.server.name}: {resource.memory_percent}%", ALERT_RECIPIENTS, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD)
+
+        if resource.disk_percent is not None and resource.disk_percent > DISK_THRESHOLD_PERCENT:
+            send_alert_email.delay("Disk Usage Alert", f"[{resource.timestamp}] High Disk on {resource.server.name}: {resource.disk_percent}%", ALERT_RECIPIENTS, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD)
+
+@shared_task
+def send_alert_email(subject, body, recipients, smtp_server, smtp_port, smtp_username, smtp_password):
+    try:
+        send_mail(
+           '' + subject,
+            body,
+            smtp_username,  # From address
+            recipients,
+            fail_silently=False,
+        )
+        print(f"[{datetime.datetime.now()}] Central server alert email sent: {subject} to {recipients}")
+    except Exception as e:
+        print(f"[{datetime.datetime.now()}] Central server error sending email: {e}")
+
+from celery import shared_task
+import datetime as dt
+from django.utils import timezone
+from .models import Server, Heartbeat, ResourceUsage
+from django.conf import settings
+from django.core.mail import send_mail
+import pytz
+@shared_task
+def monitor_server_health():
+    print(timezone.now())
+    print(settings.HEARTBEAT_TIMEOUT_MINUTES)
+    import pytz
+    ak=pytz.timezone('Asia/Karachi')
+    offline_threshold =timezone.now() - dt.timedelta(minutes=settings.HEARTBEAT_TIMEOUT_MINUTES,hours=0)
+    cpu_threshold = settings.RESOURCE_THRESHOLD_PERCENT
+    memory_threshold = settings.RESOURCE_THRESHOLD_PERCENT
+    disk_threshold = settings.RESOURCE_THRESHOLD_PERCENT
+    alert_recipients = settings.ALERT_RECIPIENTS
+    alert_subject_prefix = settings.ALERT_SUBJECT_PREFIX
+    smtp_server = settings.EMAIL_HOST
+    smtp_port = settings.EMAIL_PORT
+    smtp_username = settings.EMAIL_HOST_USER
+    smtp_password = settings.EMAIL_HOST_PASSWORD
+
+    servers = Server.objects.all()
+    import pytz
+    local_tz=pytz.timezone(settings.TIME_ZONE)
+    for server in servers:
+        print(server)
+        # Check for Heartbeat
+
+        latest_heartbeat = Heartbeat.objects.filter(server=server).order_by('-timestamp').first()
+        if latest_heartbeat:
+            aware_timestamp_utc=latest_heartbeat.timestamp
+        else:
+            aware_timestamp_utc=False
+        print(aware_timestamp_utc)
+        print(offline_threshold)
+       
+        if not aware_timestamp_utc or aware_timestamp_utc < offline_threshold:
+            print(server.online_status)
+            if server.online_status != 'offline':
+                server.online_status = 'offline'
+                server.save()
+                notification_message = f"Server '{server.name}' ({server.public_ip}) is offline - No recent heartbeat."
+                send_server_status_notification.delay(server.name, notification_message, alert_recipients, smtp_server, smtp_port, smtp_username, smtp_password)
+                print(f"[{timezone.now()}] Server '{server.name}' marked as offline.")
+        elif server.state == 'offline':
+            server.online_status = 'online'
+            server.save()
+            notification_message = f"Server '{server.name}' ({server.public}) is back online - Heartbeat received."
+            send_server_status_notification.delay(server.name, notification_message, alert_recipients, smtp_server, smtp_port, smtp_username, smtp_password)
+            print(f"[{timezone.now()}] Server '{server.name}' marked as online.")
+
+        # Check for Resource Usage
+        latest_resource = ResourceUsage.objects.filter(server=server).order_by('-timestamp').first()
+        if latest_resource:
+            health_status = 'healthy'
+            reason = []
+            if latest_resource.cpu_percent is not None and latest_resource.cpu_percent > cpu_threshold:
+                health_status = 'unhealthy'
+                reason.append(f"CPU usage: {latest_resource.cpu_percent}% > {cpu_threshold}%")
+            if latest_resource.memory_percent is not None and latest_resource.memory_percent > memory_threshold:
+                if health_status == 'healthy':
+                    health_status = 'unhealthy'
+                reason.append(f"Memory usage: {latest_resource.memory_percent}% > {memory_threshold}%")
+            if latest_resource.disk_percent is not None and latest_resource.disk_percent > disk_threshold:
+                if health_status == 'healthy':
+                    health_status = 'unhealthy'
+                reason.append(f"Disk usage: {latest_resource.disk_percent}% > {disk_threshold}%")
+
+            if health_status == 'unhealthy' and server.health != 'unhealthy':
+                server.health = 'unhealthy'
+                #server.health_reason = ", ".join(reason)
+                server.save()
+                notification_message = f"Server '{server.name}' ({server.ip_address}) is unhealthy - {server.health_reason}."
+                send_server_health_notification.delay(server.name, notification_message, alert_recipients, smtp_server, smtp_port, smtp_username, smtp_password)
+                print(f"[{timezone.now()}] Server '{server.name}' marked as unhealthy: {server.health_reason}")
+            elif health_status == 'healthy' and server.health != 'healthy':
+                server.health = 'healthy'
+                #server.health_reason = ''
+                server.save()
+                print(f"[{timezone.now()}] Server '{server.name}' marked as healthy.")
+
+@shared_task
+def send_server_status_notification(server_name, message, recipients, smtp_server, smtp_port, smtp_username, smtp_password):
+    try:
+        send_mail(
+            f"{settings.ALERT_SUBJECT_PREFIX} Server Status Change: {server_name}",
+            message,
+            smtp_username,  # From address
+            recipients,
+            fail_silently=False,
+        )
+        print(f"[{timezone.now()}] Server status notification sent: {message} to {recipients}")
+    except Exception as e:
+        print(f"[{timezone.now()}] Error sending server status notification: {e}")
+
+@shared_task
+def send_server_health_notification(server_name, message, recipients, smtp_server, smtp_port, smtp_username, smtp_password):
+    try:
+        send_mail(
+            f"{settings.ALERT_SUBJECT_PREFIX} Server Health Alert: {server_name}",
+            message,
+            smtp_username,  # From address
+            recipients,
+            fail_silently=False,
+        )
+        print(f"[{timezone.now()}] Server health notification sent: {message} to {recipients}")
+    except Exception as e:
+        print(f"[{timezone.now()}] Error sending server health notification: {e}")
+
+@shared_task
+def process_task_event(event_data):
+    event_type = event_data.get('event_type')
+    task_data = event_data.get('payload', {})
+    uuid = task_data.get('uuid')
+
+    if not uuid:
+        print(f"[{timezone.now()}] Received task event without UUID. Ignoring.")
+        return
+
+    try:
+        task = Task.objects.get(uuid=uuid)
+        print(f"[{timezone.now()}] Found existing task with UUID: {uuid}, status: {task.status}")
+
+        if event_type == 'task_started':
+            if task.status != 'started':
+                task.status = 'started'
+                task.last_state_changed_at = timezone.now()
+                task.save()
+                print(f"[{timezone.now()}] Task {uuid} status updated to started.")
+        elif event_type == 'task_completed':
+            task.status = 'completed'
+            task.last_state_changed_at = timezone.now()
+            task.save()
+            print(f"[{timezone.now()}] Task {uuid} status updated to completed.")
+        elif event_type == 'task_failed':
+            task.status = 'failed'
+            task.last_state_changed_at = timezone.now()
+            task.save()
+            print(f"[{timezone.now()}] Task {uuid} status updated to failed.")
+        elif event_type == 'task_stopped':
+            task.status = 'stopped'
+            task.last_state_changed_at = timezone.now()
+            task.save()
+            print(f"[{timezone.now()}] Task {uuid} status updated to stopped.")
+            add_data = task_data.get('add_data', {})
+            data_source = add_data.get('data_source', [])
+            for source in data_source:
+                if source.get('lock_results'):
+                    # In a real scenario, you would have logic to release the lock
+                    # For this example, we are just commenting it out.
+                    print(f"[{timezone.now()}] Task {uuid}: Lock for data source {source} would be released (commented out).")
+                    # Logic to release the lock on the data source would go here
+                    pass
+        else:
+            print(f"[{timezone.now()}] Received unknown task event type: {event_type} for UUID: {uuid}")
+
+    except Task.DoesNotExist:
+        if event_type == 'task_started':
+            # Potential Security Flaw Highlighted:
+            # Creating a task on the central system based solely on a 'task_started' event
+            # from an external source without proper authentication and authorization
+            # is a significant security vulnerability. Malicious actors could potentially
+            # create arbitrary tasks on your central system by sending crafted events.
+            #
+            # In a production environment, you MUST have robust authentication and
+            # authorization mechanisms in your EventView to verify the source and
+            # legitimacy of 'task_started' events before creating tasks.
+
+            Task.objects.create(
+                uuid=uuid,
+                service=task_data.get('service'),
+                os=task_data.get('os'),
+                interact=task_data.get('interact', False),
+                end_point=task_data.get('end_point'),
+                data_point=task_data.get('data_point'),
+                input=task_data.get('input'),
+                add_data=task_data.get('add_data'),
+                run_id=task_data.get('run_id'),
+                last_state_changed_at=timezone.now(),
+                status='started',  # Assuming if we receive 'started' and don't find it, it's just started
+                device=task_data.get('device'),
+                ref_id=task_data.get('ref_id'),
+                # Potentially map other relevant fields from the event
+            )
+            print(f"[{timezone.now()}] Task with UUID: {uuid} not found, created and set to started.")
+        else:
+            print(f"[{timezone.now()}] Task with UUID: {uuid} not found, and event type is not 'task_started'. Ignoring.")

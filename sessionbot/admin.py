@@ -44,11 +44,11 @@ class SessionBotAdmin(AdminChangeLinksMixin,
     def assign_selected_profiles_to_campaign(self, request, queryset):
         print(request)
 admin.site.register(ChildBot,SessionBotAdmin)
-admin.site.register(Server)
+
 admin.site.register(DataHouseSyncStatus)
 class TaskAdmin(admin.ModelAdmin):
-    list_filter=['ref_id','status','os','end_point','data_point','device']
-    list_display=['uuid','ref_id','service','end_point','data_point','created_at','input','os','repeat','profile','device','status','retries_count']
+    list_filter=['ref_id','status','os','server','end_point','data_point','device']
+    list_display=['uuid','ref_id','service','server','end_point','data_point','created_at','input','os','repeat','profile','device','status','retries_count']
     actions = ['start_tasks','stop_tasks','resume_tasks','pause_tasks']
     search_fields = (
                      'profile',
@@ -87,3 +87,33 @@ admin.site.register(CampaignTextContent)
 admin.site.register(Settings)
 admin.site.register(Sharing)
 admin.site.register(Todo)
+
+from django.contrib import admin
+from .models import Server, Event, Heartbeat, ResourceUsage
+
+@admin.register(Server)
+class ServerAdmin(admin.ModelAdmin):
+    list_display = ('name', 'public_ip')
+  
+    search_fields = ('name', 'public_ip')
+
+@admin.register(Event)
+class EventAdmin(admin.ModelAdmin):
+    list_display = ('event_type', 'server', 'timestamp', 'received_at')
+    list_filter = ('event_type', 'server')
+    date_hierarchy = 'received_at'
+    search_fields = ('server__name',)
+
+@admin.register(Heartbeat)
+class HeartbeatAdmin(admin.ModelAdmin):
+    list_display = ('server', 'timestamp', 'received_at')
+    list_filter = ('server',)
+    date_hierarchy = 'received_at'
+    search_fields = ('server__name',)
+
+@admin.register(ResourceUsage)
+class ResourceUsageAdmin(admin.ModelAdmin):
+    list_display = ('server', 'timestamp', 'cpu_percent', 'memory_percent', 'disk_percent', 'received_at')
+    list_filter = ('server',)
+    date_hierarchy = 'received_at'
+    search_fields = ('server__name',)

@@ -68,7 +68,8 @@ OPERATIONS_CHOICES = []
 INSTANCE_TYPES = (
     ('main', 'Main'),
     ('data_server', 'DataServer'),
-    ('login_server', 'LoginServer'),
+    ('storage_server', 'StorageServer'),
+    ('central_server', 'CentralServer'),
     ('worker_server', 'WorkerServer'),
     ('dev_server', 'DevelopmentServer')
 )
@@ -265,6 +266,7 @@ class Server(BaseModel):
                              max_length=500,
                              default='pending'
                              )
+    health=models.CharField(choices=(('healthy','Healthy'),('unhealthy','UnHealthy')),max_length=50,blank=False,default='healthy')
     online_status = models.CharField(choices=INSTANCE_ONLINE_STATUS_CHOICES,
                                      max_length=500,
                                      default='offline'
@@ -272,14 +274,9 @@ class Server(BaseModel):
     running_process_count = models.IntegerField(default=0)
     task_queue_count = models.IntegerField(default=0)
     last_heart_beat = models.DateTimeField(blank=True, null=True)
-    ram_usage = models.IntegerField(default=0)
-    disk_usage = models.IntegerField(default=0)
-    tm_state = models.CharField(
-        blank=True,
-        null=True,
-        max_length=10,
-        choices=TM_STATES
-    )
+    ram_percent = models.IntegerField(default=0)
+    disk_percent = models.IntegerField(default=0)
+    cpu_percent=models.IntegerField(default=0)
     localstore_active=models.BooleanField(default=False)
     access_secret_key=models.CharField(unique=True,max_length=5000,null=True,blank=True)
     maximum_parallel_tasks_allowed = models.IntegerField(default=1)
@@ -1870,3 +1867,39 @@ class AnalysisResult(models.Model):
 
     class Meta:
         ordering = ['-datetime'] # Order by latest analysis first
+
+class Event(models.Model):
+    EVENT_TYPES = (
+        ('heartbeat', 'Heartbeat'),
+        ('resource', 'Resource Usage'),
+        # Add other event types as needed
+    )
+    event_type = models.CharField(max_length=50, choices=EVENT_TYPES)
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name='events')
+    timestamp = models.DateTimeField()
+    payload = models.JSONField()  # Store the actual data as JSON
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event_type} from {self.server.name} at {self.timestamp}"
+    
+class Heartbeat(models.Model):
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name='heartbeats',null=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    hostname = models.CharField(max_length=255)
+    os = models.CharField(max_length=255)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.server.name} - {self.timestamp}"
+
+class ResourceUsage(models.Model):
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name='resource_usage',null=True)
+    timestamp = models.DateTimeField()
+    cpu_percent = models.FloatField()
+    memory_percent = models.FloatField()
+    disk_percent = models.FloatField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.server.name} - {self.timestamp}"

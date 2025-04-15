@@ -199,3 +199,17 @@ CORS_ALLOWED_ORIGINS = [
 DATA_HOUSE_URL='http://208.109.241.136:8080/'
 STORAGE_HOUSE_URL='https://b8fd-2603-3-610c-1060-00.ngrok-free.app/'
 DATA_UPLOAD_MAX_MEMORY_SIZE=None
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # Replace with your SMTP server
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'your_gmail_address@gmail.com'  # Replace with your email address
+EMAIL_HOST_PASSWORD = 'your_gmail_password'  # Replace with your email password or app password
+DEFAULT_FROM_EMAIL = 'your_gmail_address@gmail.com'
+
+# Alert Thresholds and Recipients
+HEARTBEAT_TIMEOUT_MINUTES = 1
+RESOURCE_THRESHOLD_PERCENT = 80
+ALERT_RECIPIENTS = ['your_admin_email@example.com']  # Replace with the recipient email(s)
+ALERT_SUBJECT_PREFIX = "[Central Alert] "

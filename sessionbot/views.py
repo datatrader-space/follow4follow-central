@@ -1007,6 +1007,41 @@ from .models import ChildBot, Task, Log
 from django.db.models import Q
 from datetime import datetime
 import uuid
+from rest_framework import viewsets, views, status
+from rest_framework.response import Response
+
+from sessionbot.models import Event, Server
+from django.utils.decorators import method_decorator
+from rest_framework.permissions import DjangoModelPermissionsOrAnonReadOnly
+from rest_framework.permissions import AllowAny
+@method_decorator(csrf_exempt, name='dispatch')
+class EventView(views.APIView):
+    permission_classes = [AllowAny]
+    queryset = Event.objects.all()  # Associate with the Event model
+    def post(self, request):
+        from sessionbot.serializers import EventSerializer
+        from sessionbot.tasks import process_event_for_servers,process_task_event
+        serializer = EventSerializer(data=request.data)
+        print(request.data)
+        if serializer.is_valid():
+            event = serializer.save()
+            event_type = event.event_type
+
+            if event_type == 'heartbeat':
+                process_event_for_servers.delay(event.id)
+            elif event_type == 'resource':
+                process_event_for_servers.delay(event.id)
+            elif event_type=='task_started' or event_type =='task_failed' or event_type =='task_completed':
+                process_task_event(event.id)
+                
+           
+            else:
+                print(f"Unknown event type received: {event_type}")
+
+            return Response({"message": "Event received and is being processed."}, status=status.HTTP_202_ACCEPTED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 @csrf_exempt
 def task_actions(request):
     if request.method == 'POST':

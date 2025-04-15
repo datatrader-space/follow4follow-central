@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import task_actions,sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
+from .views import EventView,task_actions,sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
 from django.urls import path, include
 from sessionbot.models import Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
 from rest_framework import routers, serializers, viewsets
@@ -151,6 +151,10 @@ class TodoViewSet(viewsets.ModelViewSet):
     serializer_class=TodoSerializer  
 # ViewSets define the view behavior.
 
+        # If you want to allow sending server_name and have the serializer handle
+        # finding or creating the Server, you'd need a more complex implementation
+        # involving overriding the create method. For this basic integration,
+        # we'll expect the client to send the server's primary key.
 # Routers provide an easy way of automatically determining the URL conf.
 
 router = routers.DefaultRouter()
@@ -167,6 +171,7 @@ router.register(r'bulkcampaign', BulkCampaignViewSet)
 router.register(r'audience',AudienceViewSet)
 router.register(r'tasks', TaskViewSet)
 
+
 urlpatterns = [
     path("api/resource/bulk-campaign/", bulk_campaign, name='bulk_campaign'),
     path("api/resource/create/", createResource, name="create_resource"),
@@ -182,6 +187,7 @@ urlpatterns = [
     path('api/todo/', todo, name='todo_view'),
     path('api/logs/',log,name='logs'),
     path('api/tasks/action/',task_actions,name='task_actions'),
-    path('api/audience/',audience,name='audience')
+    path('api/audience/',audience,name='audience'),
+    path('api/event/', EventView.as_view(), name='receive_event'),
 
 ]
