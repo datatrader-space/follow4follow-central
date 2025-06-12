@@ -186,11 +186,12 @@ def audience(request):
                 from sessionbot.models import Audience,Task
                 d=DataHouseClient()
                 a=Audience.objects.all().filter(id=audience_id)
-                datahouse=Server.objects.all().filter(instance_type='data_house')
+                datahouse=Server.objects.all().filter(instance_type='data_server')
                 if datahouse:
                     datahouse_url=datahouse.public_ip
                     d.base_url=datahouse_url
                 else:
+                    print('datahouse not found')
                     return JsonResponse({'status': 'failed. Datahouse not found','data':[]}, status=200)   
                 print(a)
                 if a:
