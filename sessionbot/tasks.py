@@ -124,6 +124,8 @@ def sync_with_data_house_and_workers():
             target_payloads[data_house_url].append(message) # Always send to datahouse
 
     all_successful_uuids = {}
+    if len(target_payloads)==0:
+        return True
 
     for target_url, payloads in target_payloads.items():
         print(target_url)
