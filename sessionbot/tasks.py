@@ -52,8 +52,8 @@ def sync_with_data_house_and_workers():
                         del object_body['_state']
                     print(object_body)
                     for key, value in object_body.items():
-                        print(isinstance(value, models.Model))
-                        print( isinstance(value, datetime))
+                        
+                        print( isinstance(value, datetime.datetime))
                         if isinstance(value, models.Model):
                             print('m')
                             object_body[key] = str(value)
