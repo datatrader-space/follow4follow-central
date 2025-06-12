@@ -188,7 +188,7 @@ def audience(request):
                 a=Audience.objects.all().filter(id=audience_id)
                 datahouse=Server.objects.all().filter(instance_type='data_server')
                 if datahouse:
-                    datahouse_url=datahouse.public_ip
+                    datahouse_url=datahouse[0].public_ip
                     d.base_url=datahouse_url
                 else:
                     print('datahouse not found')
@@ -210,8 +210,8 @@ def audience(request):
                 unique_usernames=[]
                 storagehouse=Server.objects.all().filter(instance_type='storage_house')
                 if storagehouse:
-                    storagehouse_url=storagehouse.public_ip
-                    storagehouse_ngrok_url=storagehouse.instance_id
+                    storagehouse_url=storagehouse[0].public_ip
+                    storagehouse_ngrok_url=storagehouse[0].instance_id
                 for row in resp['data']:
                     if row['username'] in unique_usernames:
                             continue
