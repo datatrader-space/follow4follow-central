@@ -1,4 +1,4 @@
-from sessionbot.models import ScrapeTask,Log,Task
+from sessionbot.models import ScrapeTask,Log,Task,Server
 import uuid
 from django.conf import settings
 def handle_scrape_task(scrapetask,event='created',form={}):
@@ -64,6 +64,7 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 'max_requests_per_day':200,
                 'max_requests_per_run':5,
                 'save_to_storage_house':True,
+               
                 },   
                 'ref_id':scrapetask.uuid,
                 'paused':False if start_scraping else True,
@@ -90,39 +91,38 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 l=Log(end_point='scrapetask',label='INFO',message=bot.username+' doesnt have a server assigned. Ignoring the bot, please assign server to the bot, and edit/save scrapetask '+str(scrapetask.name) +' again')
                 l.save()
             else:
-                dup_check=Task.objects.all().filter(end_point=end_point).filter(data_point=data_point).filter(input=task['input']).filter(profile=bot.username)
+                t=Task.objects.all().filter(end_point=end_point).filter(data_point=data_point).filter(input=task['input']).filter(profile=bot.username)
             
-                if len(dup_check)>0:
+                if len(t)>0:
                     message='Excluding Duplicate Scrape Task Creation.Data: ' +str(task)
                     l=Log(end_point='scrapetask',label='INFO',message=message)
                     l.save()
+                    t=t[0]
                     
-                    continue
+
                 else:
                     task.update({'os':'browser','profile':bot.username,'uuid':str(uuid.uuid1()),'server_id':bot.logged_in_on_servers.id,'registered':False})
                     t=Task(**task)
                     t.save()
-                    _={'service':'datahouse',
-                    'ref_id':t.ref_id,
-                    'end_point':"update",
-                    'data_point':'send_update_to_client',
-                    'add_data':{'data_source':[{'type':'task','identifier':t.uuid}],
-                        'client_url':settings.DATA_HOUSE_URL,
-                        'client_id':'central-v1',                                                 
+                add_data=task['add_data']
+                reporting_house_server=Server.objects.all().filter(instance_type='reporting_and_analytics_server')
+                if reporting_house_server:
+                    reporting_house_server=reporting_house_server[0]
+                    reporting_house_url=reporting_house_server.public_ip+'reporting/task-reports'
+                    add_data.update({'reproting_house_url':reporting_house_url})
+                datahouse_server=Server.objects.all().filter(instance_type='data_server')
+                if datahouse_server:
+                    datahouse_server=datahouse_server[0]
+                    datahouse_url=datahouse_server.public_ip
+                    add_data.update({'datahouse_blocks':["users","posts"]})
+                t.add_data=add_data
+                t.save()
 
-                    },
-                    'repeat':True,
-                    'repeat_duration':'1m',
-                    'uuid':str(uuid.uuid1())
-                                    }
-                    _=Task(**_)
-                    _.save()
-                    _.server=t.server
-                    _.save()
-                    message='Successfully Created a scraping task for '+str(data_point)+' for '+str(bot.username)
-                    l=Log(end_point='scrapetask',label='INFO',message=message)
-                    l.save()
-                    print(task)
+                message='Successfully Created a scraping task for '+str(data_point)+' for '+str(bot.username)
+                l=Log(end_point='scrapetask',label='INFO',message=message)
+                l.save()
+                print(task)
+                
             
 
 def handle_scrapetask_state_change(scrapetask,state=False):
