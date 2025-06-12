@@ -71,7 +71,8 @@ INSTANCE_TYPES = (
     ('storage_server', 'StorageServer'),
     ('central_server', 'CentralServer'),
     ('worker_server', 'WorkerServer'),
-    ('dev_server', 'DevelopmentServer')
+    ('dev_server', 'DevelopmentServer'),
+    'reporting_and_analytics_server','Reporting and Analytics Server'
 )
 
 TM_STATES = (
