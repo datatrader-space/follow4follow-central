@@ -57,7 +57,7 @@ def sync_with_data_house_and_workers():
                         if isinstance(value, models.Model):
                             print('m')
                             object_body[key] = str(value)
-                        elif isinstance(value, datetime):
+                        elif isinstance(value, datetime.datetime):
                             print('dt')
                             object_body[key] = value.isoformat()
                         elif isinstance(value, uuid.UUID):
