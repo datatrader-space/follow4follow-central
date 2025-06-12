@@ -105,11 +105,11 @@ def sync_with_data_house_and_workers():
             if model_class and issubclass(model_class, (Task, ChildBot, Proxy,Device)):
                 try:
                     if model_class==Task:
-                        server = status.worker
+                        server = model_instance.server
                     if model_class==ChildBot:
-                        server=status.worker
+                        server=model_instance.logged_in_on_servers
                     if model_class==Device:
-                        server=status.worker
+                        server=model_instance.connected_to_server
                     worker_url = f"{server.public_ip}crawl/api/sync/"
                     if worker_url not in target_payloads:
                         target_payloads[worker_url] = []
