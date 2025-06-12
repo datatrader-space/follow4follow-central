@@ -482,7 +482,7 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
         all_reports_data = {}
         for task_uuid in task_uuids_to_fetch:
             # Construct the URL using settings.REPORTING_API_BASE_URL
-            report_url = f"{reportinghouse_url}/reporting/task-summaries/{task_uuid}/"
+            report_url = f"{reportinghouse_url}reporting/task-summaries/{task_uuid}/"
             try:
                 response = requests.get(report_url, timeout=10)
                 response.raise_for_status()
