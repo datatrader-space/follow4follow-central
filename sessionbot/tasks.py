@@ -218,8 +218,8 @@ def communicate_tasks_with_worker():
             delete_tasks.delete()
             
 
-    import datetime as dt
-    print('sent request to worker at'+worker_tasks_url +str(dt.datetime.now()))
+        import datetime as dt
+        print('sent request to worker at'+worker_tasks_url +str(dt.datetime.now()))
 def send_comand_to_instance(instance_id, data, model_config=None):
     """Send a command to an Instance.
 
