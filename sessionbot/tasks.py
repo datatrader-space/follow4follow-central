@@ -12,15 +12,17 @@ from django.db import models
 import requests
 import json
 from django.conf import settings
-from .models import DataHouseSyncStatus,ChildBot
+from .models import DataHouseSyncStatus,ChildBot,Server
 @shared_task()
 def sync_with_data_house_and_workers():
     """
     Celery task to sync with Data House and Workers (Data House is default).
     """
-
-    data_house_url = getattr(settings, "DATA_HOUSE_URL", None)
-    data_house_url+='datahouse/api/sync/'
+    data_house_url=False
+    datahouse_server=Server.objects.all().filter(instance_type='data_server')
+    if datahouse_server:
+        data_house_url=datahouse_server[0].public_ip+'datahouse/api/sync/'
+   
     if not data_house_url:
         print("Error: DATA_HOUSE_URL setting is not defined.")
         return
