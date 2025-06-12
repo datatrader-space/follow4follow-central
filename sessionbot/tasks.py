@@ -75,13 +75,12 @@ def sync_with_data_house_and_workers():
                    
                     status.delete()
                     continue
-            print(i)
-            print(status.id)
-            
+        
+       
             if not model_instance and not final_operation=='DELETE':
                 print(final_operation)
                 print('continuing')
-                status.delete()
+            
                 continue
             from sessionbot.utils import convert_uuid_datetime_for_json
             if final_operation=='DELETE':
