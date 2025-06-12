@@ -69,8 +69,8 @@ def sync_with_data_house_and_workers():
                     print(f"Error retrieving object {object_id}: {e}")
                     object_body = None
                     model_instance = None
-                    continue
-                if (len(statuses)-i)>1:
+                   
+               
                    
                     status.delete()
             print(i)
