@@ -202,7 +202,7 @@ def audience(request):
                 print(tasks)
                 filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),'rest_id.isnull':False,'followers_count.gt':0}        
                 required_fields=['username','info__full_name','info__gender','info__country','info__followers_count','profile_picture']     
-                resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False)
+                resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False,task_uuid=tasks[0].uuid)
                 
                 results=[]
                 

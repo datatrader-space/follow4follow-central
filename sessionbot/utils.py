@@ -49,18 +49,21 @@ import uuid
 from django.conf import settings
 class DataHouseClient:
     def __init__(self):
+     
         self.base_url = settings.DATA_HOUSE_URL
         self.request_maker=requests
         
 
-    def retrieve(self, object_type, filters={}, required_fields=[],count=False,locking_filters=None, lock_results=False, ref_id=None, **kwargs):
+    def retrieve(self, object_type, filters={}, required_fields=[],task_uuid=False,count=False,locking_filters=None, lock_results=False, ref_id=None, **kwargs):
         url = f"{self.base_url}datahouse/api/provide/"  # Construct the URL
 
         payload = {
             "object_type":object_type,
             "filters":filters,
             "required_fields":required_fields ,
-            "count":count         
+            "count":count ,
+            "uuid":task_uuid
+
            
         }
         
