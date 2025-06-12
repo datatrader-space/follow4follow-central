@@ -79,6 +79,7 @@ def sync_with_data_house_and_workers():
             if not model_instance and not final_operation=='DELETE':
                 print(final_operation)
                 print('continuing')
+                status.delete()
                 continue
             from sessionbot.utils import convert_uuid_datetime_for_json
             if final_operation=='DELETE':
@@ -218,7 +219,7 @@ def communicate_tasks_with_worker():
             
 
     import datetime as dt
-    print('sent request to worker at'+str(dt.datetime.now()))
+    print('sent request to worker at'+worker_tasks_url +str(dt.datetime.now()))
 def send_comand_to_instance(instance_id, data, model_config=None):
     """Send a command to an Instance.
 
