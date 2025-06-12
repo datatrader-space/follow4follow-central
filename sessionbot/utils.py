@@ -67,7 +67,7 @@ class DataHouseClient:
            
         }
         
-
+        print(payload)
         try:
             response = self.request_maker.post(url=url,json=payload) 
             return json.loads(response.text)
