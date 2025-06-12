@@ -169,12 +169,14 @@ def communicate_tasks_with_worker():
     print(unregistered_task)
     _={}
     for task in unregistered_task:
-        
+        if task.server:
    
-        if task.server.public_ip in _.keys():
-            pass
+            if task.server.public_ip in _.keys():
+                pass
+            else:
+                _.update({task.server.public_ip:{'tasks':[],'resources':{'devices':[],'bots':[]}}})
         else:
-            _.update({task.server.public_ip:{'tasks':[],'resources':{'devices':[],'bots':[]}}})
+            continue
         if task._delete:
             method='delete'
         else:
@@ -405,6 +407,402 @@ def analyze_and_create_update_metrics_for_bots():
         pass
 
 
+
+# central/tasks.py (or similar path in your Django project)
+
+import logging
+import requests
+import uuid
+from datetime import datetime, timezone
+from collections import defaultdict
+
+from celery import shared_task
+from django.conf import settings
+
+# Import your Django models
+from sessionbot.models import ScrapeTask, Task
+# Assuming your Slack utility is here
+from sessionbot.slack_utils import send_structured_slack_message as send_slack_message
+
+
+logger = logging.getLogger(__name__)
+
+# Ensure REPORTING_API_BASE_URL is defined in your Django settings.py
+# Example: REPORTING_API_BASE_URL = 'http://192.168.1.30:81/'
+
+
+@shared_task
+def process_scrape_task_alerts(scrape_task_uuid: str = None):
+    """
+    Celery task to:
+    1. Fetch ScrapeTasks (either a specific one or all).
+    2. Find related generic operational Tasks.
+    3. Retrieve aggregated summaries from the Reporting House for these tasks.
+    4. Consolidate all relevant data for the ScrapeTask.
+    5. Format and send a comprehensive performance alert to Slack.
+
+    Args:
+        scrape_task_uuid (str, optional): The UUID of a specific ScrapeTask
+                                          to process. If None, processes all ScrapeTasks.
+    """
+    logger.info(f"Starting scrape task alerts processing for UUID: {scrape_task_uuid or 'all'}.")
+
+    query_set = ScrapeTask.objects.all()
+    reportinghouse=Server.objects.all().filter(instance_type='reporting_and_analytics_server')
+    if not reportinghouse:
+        return False
+    reportinghouse=reportinghouse[0]
+    reportinghouse_url=reportinghouse.public_ip
+    if scrape_task_uuid:
+        try:
+            # Validate UUID format
+            uuid.UUID(scrape_task_uuid)
+            query_set = query_set.filter(uuid=scrape_task_uuid)
+        except ValueError:
+            logger.error(f"Invalid UUID format provided: {scrape_task_uuid}. Aborting task.")
+            return
+
+    if not query_set.exists():
+        logger.warning(f"No ScrapeTask found for UUID: {scrape_task_uuid or 'all'}. Exiting.")
+        return
+
+    for scrape_task in query_set:
+        logger.info(f"Processing ScrapeTask: {scrape_task.name} ({scrape_task.uuid})")
+
+        # Step 1 & 2: Get associated Central Tasks and their details
+        central_tasks = Task.objects.filter(ref_id=scrape_task.uuid)
+        if not central_tasks.exists():
+            logger.warning(f"No individual tasks found for ScrapeTask: {scrape_task.name}. Skipping alert.")
+            continue
+
+        task_uuids_to_fetch = [str(t.uuid) for t in central_tasks]
+        central_tasks_by_uuid = {str(t.uuid): t for t in central_tasks}
+
+        # Step 3: Retrieve Reporting Summaries from Reporting App
+        all_reports_data = {}
+        for task_uuid in task_uuids_to_fetch:
+            # Construct the URL using settings.REPORTING_API_BASE_URL
+            report_url = f"{reportinghouse_url}/reporting/task-summaries/{task_uuid}/"
+            try:
+                response = requests.get(report_url, timeout=10)
+                response.raise_for_status()
+                report_data = response.json()
+                all_reports_data[task_uuid] = report_data
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error fetching report for task {task_uuid} from Reporting App: {e}")
+                continue # Skip this specific task's data if fetch fails
+
+        if not all_reports_data:
+            logger.warning(f"No successful reports fetched for ScrapeTask: {scrape_task.name}. Skipping alert.")
+            continue
+
+        # Step 4: Aggregate Data
+        aggregated_by_data_input = defaultdict(lambda: {
+            'total_posts_scraped': 0,
+            'total_users_scraped': 0,
+            'total_rows': 0,
+            'total_runs_completed': 0,
+            'total_saved_file_count': 0,
+            'total_failed_download_count': 0,
+        })
+        individual_bot_metrics = defaultdict(lambda: {
+            'status': 'N/A',
+            'latest_report_end_datetime': datetime.datetime.fromtimestamp(0, tz=timezone.utc),
+            'total_posts_scraped': 0,
+            'total_users_scraped': 0,
+            'total_rows': 0,
+            'total_runs_completed': 0,
+            'total_saved_file_count': 0,
+            'total_failed_download_count': 0,
+            'associated_task_uuids': []
+        })
+
+        overall_scrape_task_status = "Completed"
+        critical_issues = []
+
+        for task_uuid, report_summary in all_reports_data.items():
+            central_task = central_tasks_by_uuid.get(task_uuid)
+            if not central_task:
+                continue # Should not happen if central_tasks_by_uuid was built correctly
+
+            # --- Aggregate by (data_point, input) ---
+            key = (central_task.data_point, central_task.input)
+
+            # Handling aggregated_scraped_data
+            if isinstance(report_summary.get('aggregated_scraped_data'), dict):
+                for metric, value in report_summary['aggregated_scraped_data'].items():
+                    if isinstance(value, (int, float)):
+                        aggregated_by_data_input[key][metric] += value
+
+            # Handling aggregated_data_enrichment
+            if isinstance(report_summary.get('aggregated_data_enrichment'), dict):
+                for metric, value in report_summary['aggregated_data_enrichment'].items():
+                    if isinstance(value, (int, float)):
+                        aggregated_by_data_input[key][metric] += value
+
+            aggregated_by_data_input[key]['total_runs_completed'] += report_summary.get('total_runs_completed', 0)
+            aggregated_by_data_input[key]['total_saved_file_count'] += report_summary.get('total_saved_file_count', 0)
+            aggregated_by_data_input[key]['total_failed_download_count'] += report_summary.get('total_failed_download_count', 0)
+
+            # --- Individual Bot Metrics ---
+            from datetime import timezone
+            username = central_task.profile
+            if username:
+                current_report_end_dt_str = report_summary.get('latest_report_end_datetime')
+                current_report_end_dt = datetime.datetime.min.replace(tzinfo=timezone.utc) # Ensure timezone-aware comparison
+                if current_report_end_dt_str:
+                    try:
+                        current_report_end_dt = datetime.datetime.fromisoformat(current_report_end_dt_str.replace('Z', '+00:00'))
+                    except ValueError:
+                        logger.warning(f"Could not parse datetime '{current_report_end_dt_str}' for task {task_uuid[:8]}.")
+
+                bot_entry = individual_bot_metrics[username]
+
+                # Determine bot status based on latest task
+                if current_report_end_dt > bot_entry['latest_report_end_datetime']:
+                    bot_entry['status'] = report_summary.get('latest_overall_bot_login_status', 'N/A')
+                    bot_entry['latest_report_end_datetime'] = current_report_end_dt
+                elif current_report_end_dt == bot_entry['latest_report_end_datetime']:
+                    if report_summary.get('latest_overall_bot_login_status') == 'Logged Out':
+                        bot_entry['status'] = 'Logged Out'
+                
+                # Sum metrics for the bot
+                if isinstance(report_summary.get('aggregated_scraped_data'), dict):
+                   for metric, value in report_summary['aggregated_scraped_data'].items():
+                       if isinstance(value, (int, float)):
+                           bot_entry[metric] = bot_entry.get(metric, 0) + value
+                
+                if isinstance(report_summary.get('aggregated_data_enrichment'), dict):
+                   for metric, value in report_summary['aggregated_data_enrichment'].items():
+                       if isinstance(value, (int, float)):
+                           bot_entry[metric] = bot_entry.get(metric, 0) + value
+
+                bot_entry['total_runs_completed'] += report_summary.get('total_runs_completed', 0)
+                bot_entry['total_saved_file_count'] += report_summary.get('total_saved_file_count', 0)
+                bot_entry['total_failed_download_count'] += report_summary.get('total_failed_download_count', 0)
+                bot_entry['associated_task_uuids'].append(task_uuid)
+
+            # --- Overall ScrapeTask Status & Critical Issues ---
+            task_status = report_summary.get('latest_overall_task_status')
+            if task_status == 'Failed':
+                overall_scrape_task_status = 'Failed'
+            elif task_status == 'Incomplete' and overall_scrape_task_status != 'Failed':
+                overall_scrape_task_status = 'Incomplete'
+            elif task_status == 'Running' and overall_scrape_task_status not in ['Failed', 'Incomplete']:
+                overall_scrape_task_status = 'Running'
+
+            if report_summary.get('latest_overall_bot_login_status') == 'Logged Out':
+                critical_issues.append(f"Bot for task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}) is LOGGED OUT.")
+            if 'exception(s) detected' in str(report_summary.get('all_exceptions')).lower():
+                critical_issues.append(f"Exception detected in task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}).")
+            if 'billing issues' in str(report_summary.get('latest_billing_issue_resolution_status')).lower() and \
+               'n/a' not in str(report_summary.get('latest_billing_issue_resolution_status')).lower():
+                critical_issues.append(f"Billing issue for task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}).")
+            if report_summary.get('total_failed_download_count', 0) > 0:
+                critical_issues.append(f"Failed downloads in task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}).")
+            
+        # Step 5: Generate Slack Message
+        slack_blocks = _build_slack_message_blocks(
+            scrape_task=scrape_task,
+            overall_scrape_task_status=overall_scrape_task_status,
+            aggregated_by_data_input=aggregated_by_data_input,
+            individual_bot_metrics=individual_bot_metrics,
+            critical_issues=critical_issues
+        )
+
+        # Send the message
+        try:
+            # Using a hardcoded channel as in your original snippet. Consider making this configurable.
+            send_slack_message(slack_blocks, channel='Client') 
+            logger.info(f"Successfully sent Slack alert for ScrapeTask: {scrape_task.name}")
+        except Exception as e:
+            logger.error(f"Failed to send Slack message for ScrapeTask {scrape_task.name}: {e}")
+            logger.error("Ensure Slack integration is correctly configured and bot has permissions.")
+            
+    logger.info('Scrape task alerts processing finished.')
+
+
+def _build_slack_message_blocks(scrape_task, overall_scrape_task_status,
+                                 aggregated_by_data_input, individual_bot_metrics,
+                                 critical_issues):
+    """
+    Helper function to construct the Slack message blocks.
+    This is extracted as a standalone function for use by the Celery task.
+    """
+    from datetime import timezone
+    blocks = []
+
+    # Header Section
+    blocks.append({
+        "type": "header",
+        "text": {
+            "type": "plain_text",
+            "text": f"📊 ScrapeTask Performance Alert: {scrape_task.name}",
+            "emoji": True
+        }
+    })
+    blocks.append({
+        "type": "context",
+        "elements": [
+            {
+                "type": "mrkdwn",
+                "text": f"Scrape Task ID: `{scrape_task.uuid}` | Generated: {datetime.datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            }
+        ]
+    })
+    blocks.append({"type": "divider"})
+
+    # Overall Status
+    status_emoji = "✅" if overall_scrape_task_status == "Completed" else \
+                   "🟡" if overall_scrape_task_status == "Running" else \
+                   "⚠️" if overall_scrape_task_status == "Incomplete" else \
+                   "❌"
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": f"*Overall ScrapeTask Status:* {status_emoji} {overall_scrape_task_status}"
+        }
+    })
+    blocks.append({"type": "divider"})
+
+    # Critical Issues Section
+    if critical_issues:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "🚨 *Critical Issues Detected:*"
+            }
+        })
+        for issue in sorted(list(set(critical_issues))): # Use set to avoid duplicate issue messages, then sort
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"• {issue}"
+                }
+            })
+        blocks.append({"type": "divider"})
+
+    # Aggregated by Data Point and Input
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*🔬 Aggregated Data by Target:*"
+        }
+    })
+    if aggregated_by_data_input:
+        # Sort by data_point and input for consistent output
+        sorted_aggregated_data = sorted(aggregated_by_data_input.items(), key=lambda item: (item[0][0], item[0][1]))
+        for (data_point, input_value), metrics in sorted_aggregated_data:
+            metrics_text = []
+            # Sort metrics alphabetically for consistent display
+            for metric_key in sorted(metrics.keys()):
+                value = metrics[metric_key]
+                if value:
+                    display_metric = metric_key.replace('_', ' ').title()
+                    if display_metric == 'Total Posts Scraped':
+                        display_metric = 'Posts Scraped'
+                    elif display_metric == 'Total Users Scraped':
+                        display_metric = 'Users Scraped'
+                    elif display_metric == 'Total Rows':
+                        display_metric = 'Rows Scraped/Enriched'
+                    elif display_metric == 'Total Runs Completed':
+                        display_metric = 'Runs Completed'
+                    elif display_metric == 'Total Saved File Count':
+                        display_metric = 'Files Saved'
+                    elif display_metric == 'Total Failed Download Count':
+                        display_metric = 'Failed Downloads'
+
+                    metrics_text.append(f"{display_metric}: *{value}*")
+
+            if metrics_text:
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{data_point.replace('_', ' ').title()} - Input: `{input_value}`*\n" + ", ".join(metrics_text)
+                    }
+                })
+        blocks.append({"type": "divider"})
+    else:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "No aggregated data metrics available for this ScrapeTask."
+            }
+        })
+        blocks.append({"type": "divider"})
+
+
+    # Individual Bot Statuses
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*🤖 Individual Bot Statuses:*"
+        }
+    })
+    if individual_bot_metrics:
+        # Sort by username for consistent output
+        sorted_bot_metrics = sorted(individual_bot_metrics.items(), key=lambda item: item[0])
+        for username, bot_info in sorted_bot_metrics:
+            bot_status_emoji = "✅" if bot_info['status'] == "Logged In" else "❌"
+            
+            # Filter and sort metrics for display
+            display_metrics = []
+            for metric_key in sorted(bot_info.keys()):
+                if metric_key not in ['status', 'latest_report_end_datetime', 'associated_task_uuids']:
+                    value = bot_info[metric_key]
+                    if value:
+                        display_metric = metric_key.replace('_', ' ').title()
+                        if display_metric == 'Total Posts Scraped':
+                            display_metric = 'Posts Scraped'
+                        elif display_metric == 'Total Users Scraped':
+                            display_metric = 'Users Scraped'
+                        elif display_metric == 'Total Rows':
+                            display_metric = 'Rows Scraped/Enriched'
+                        elif display_metric == 'Total Runs Completed':
+                            display_metric = 'Runs Completed'
+                        elif display_metric == 'Total Saved File Count':
+                            display_metric = 'Files Saved'
+                        elif display_metric == 'Total Failed Download Count':
+                            display_metric = 'Failed Downloads'
+                        display_metrics.append(f"{display_metric}: *{value}*")
+            
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"• *Bot: {username}* Status: {bot_status_emoji} {bot_info['status']}\n  " + ", ".join(display_metrics)
+                }
+            })
+        blocks.append({"type": "divider"})
+    else:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "No individual bot metrics available for this ScrapeTask."
+            }
+        })
+        blocks.append({"type": "divider"})
+
+    # Footer
+    blocks.append({
+        "type": "context",
+        "elements": [
+            {
+                "type": "mrkdwn",
+                "text": f"Generated for ScrapeTask ID: `{scrape_task.uuid}` at {datetime.datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            }
+        ]
+    })
+
+    return blocks
 
 from celery import shared_task
 import requests

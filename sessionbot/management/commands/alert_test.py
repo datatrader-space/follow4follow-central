@@ -14,7 +14,7 @@ from sessionbot.slack_utils import send_structured_slack_message as send_slack_m
 
 # Configuration for the Reporting App API
 # Make sure REPORTING_API_BASE_URL is defined in your Central app's settings.py
-REPORTING_API_BASE_URL = getattr(settings, 'REPORTING_API_BASE_URL', 'http://localhost:8000/api/')
+REPORTING_API_BASE_URL = getattr(settings, 'REPORTING_API_BASE_URL', 'http://192.168.1.30:81//api/')
 
 class Command(BaseCommand):
     help = 'Generates and sends client alerts for ScrapeTasks, aggregating data by (data_point, input) and providing individual bot statuses.'
@@ -59,7 +59,7 @@ class Command(BaseCommand):
             # Step 3: Retrieve Reporting Summaries from Reporting App
             all_reports_data = {}
             for task_uuid in task_uuids_to_fetch:
-                report_url = f"http://localhost:81/reporting/task-summaries/{task_uuid}/"
+                report_url = f"http://192.168.1.30:81/task-summaries/{task_uuid}/"
                 try:
                     response = requests.get(report_url, timeout=10) # Add timeout
                     response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
