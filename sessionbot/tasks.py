@@ -74,6 +74,7 @@ def sync_with_data_house_and_workers():
                
                    
                     status.delete()
+                    continue
             print(i)
             print(status.id)
             
