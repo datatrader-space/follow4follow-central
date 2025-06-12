@@ -108,7 +108,7 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 reporting_house_server=Server.objects.all().filter(instance_type='reporting_and_analytics_server')
                 if reporting_house_server:
                     reporting_house_server=reporting_house_server[0]
-                    reporting_house_url=reporting_house_server.public_ip+'reporting/task-reports'
+                    reporting_house_url=reporting_house_server.public_ip+'reporting/task-reports/'
                     add_data.update({'reporting_house_url':reporting_house_url})
                 datahouse_server=Server.objects.all().filter(instance_type='data_server')
                 if datahouse_server:
