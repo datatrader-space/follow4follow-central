@@ -109,12 +109,12 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 if reporting_house_server:
                     reporting_house_server=reporting_house_server[0]
                     reporting_house_url=reporting_house_server.public_ip+'reporting/task-reports'
-                    add_data.update({'reproting_house_url':reporting_house_url})
+                    add_data.update({'reporting_house_url':reporting_house_url})
                 datahouse_server=Server.objects.all().filter(instance_type='data_server')
                 if datahouse_server:
                     datahouse_server=datahouse_server[0]
-                    datahouse_url=datahouse_server.public_ip
-                    add_data.update({'datahouse_blocks':["users","posts"]})
+                    datahouse_url=datahouse_server.public_ip+'datahouse/api/consume/'
+                    add_data.update({'datahouse_blocks':["users","posts"],"datahouse_url":datahouse_url})
                 t.add_data=add_data
                 t.save()
 
