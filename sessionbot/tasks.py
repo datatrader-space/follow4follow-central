@@ -128,7 +128,8 @@ def sync_with_data_house_and_workers():
         return True
 
     for target_url, payloads in target_payloads.items():
-        print(target_url)
+        if len(payloads)==0:
+            continue
         headers = {"Content-Type": "application/json"}
         try:
             response = requests.post(target_url, data=json.dumps({'data':payloads}), headers=headers)
