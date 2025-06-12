@@ -496,8 +496,9 @@ def scrape_task(request):
                     results.append({_id:res})
             else:
                 
-                vals=[]
+                
                 for obj in ScrapeTask.objects.all():
+                    vals=[]
                     res=model_to_dict(obj)
                     for input in obj.input.split(','):
                             if 'followers' in input:
