@@ -516,7 +516,7 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
             'total_failed_download_count': 0,
             'associated_task_uuids': []
         })
-        scrape_task.scraped_so_far=aggregated_by_data_input['total_users_scraped']
+    
         scrape_task.bot_status=individual_bot_metrics
         scrape_task.save()
         overall_scrape_task_status = "Completed"
