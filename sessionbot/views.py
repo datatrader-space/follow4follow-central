@@ -186,6 +186,12 @@ def audience(request):
                 from sessionbot.models import Audience,Task
                 d=DataHouseClient()
                 a=Audience.objects.all().filter(id=audience_id)
+                datahouse=Server.objects.all().filter(instance_type='data_house')
+                if datahouse:
+                    datahouse_url=datahouse.public_ip
+                    d.base_url=datahouse_url
+                else:
+                    return JsonResponse({'status': 'failed. Datahouse not found','data':[]}, status=200)   
                 print(a)
                 if a:
                     a=a[0]
@@ -201,13 +207,17 @@ def audience(request):
                 
                 print(resp['data'][0])
                 unique_usernames=[]
+                storagehouse=Server.objects.all().filter(instance_type='storage_house')
+                if storagehouse:
+                    storagehouse_url=storagehouse.public_ip
+                    storagehouse_ngrok_url=storagehouse.instance_id
                 for row in resp['data']:
                     if row['username'] in unique_usernames:
                             continue
                     else:
                         if row.get('profile_picture'):
                             
-                            url=settings.STORAGE_HOUSE_URL+row['profile_picture']
+                            url=storagehouse_ngrok_url+row['profile_picture']
                             import urllib
                             import re
                             cleaned_url = url.replace("\\", "/")
