@@ -42,7 +42,7 @@ def sync_with_data_house_and_workers():
                 model_class_name = status.model_name
                 try:
                     model_class = apps.get_model('sessionbot', model_class_name)  # Replace 'your_app_name'
-                    print(model_class.DoesNotExist)
+                    print(object_id)
                     model_instance = model_class.objects.get(uuid=object_id)
                     if not model_instance:
                         status.delete()
