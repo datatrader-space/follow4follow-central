@@ -52,12 +52,16 @@ def sync_with_data_house_and_workers():
                         del object_body['_state']
                     print(object_body)
                     for key, value in object_body.items():
-                        print(key)
+                        print(isinstance(value, models.Model))
+                        print( isinstance(value, datetime))
                         if isinstance(value, models.Model):
+                            print('m')
                             object_body[key] = str(value)
                         elif isinstance(value, datetime):
+                            print('dt')
                             object_body[key] = value.isoformat()
                         elif isinstance(value, uuid.UUID):
+                            print('t')
                             object_body[key] = str(value)
                         elif isinstance(value, bool):
                             object_body[key] = str(value).lower()
