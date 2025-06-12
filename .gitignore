@@ -1,6 +1,7 @@
 crawler/
 
-
+dump.rdb
+Redis/dump.rdb
 venv
 data
 media
