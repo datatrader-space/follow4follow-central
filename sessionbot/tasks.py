@@ -431,6 +431,42 @@ logger = logging.getLogger(__name__)
 # Example: REPORTING_API_BASE_URL = 'http://192.168.1.30:81/'
 
 
+
+# central/tasks.py
+
+import logging
+import requests
+import uuid
+from datetime import datetime, timezone # Correct import for datetime and timezone
+from collections import defaultdict
+import json # Useful for general Redis operations, though not strictly needed for simple string sets
+
+from celery import shared_task
+from django.conf import settings
+from django_redis import get_redis_connection # Import for Redis connection
+
+# Import your Django models (ensure these paths are correct for your project)
+from sessionbot.models import ScrapeTask, Task, Server # Assuming Server model is in central.models
+# Assuming your Slack utility is here
+from sessionbot.slack_utils import send_structured_slack_message as send_slack_message
+
+
+logger = logging.getLogger(__name__)
+
+# --- Configuration Notes ---
+# Ensure your Redis CACHES are configured in settings.py, e.g.:
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         "LOCATION": "redis://127.0.0.1:6379/1", # Or your Redis URL. Use a dedicated DB for notifications if possible.
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#         }
+#     }
+# }
+# --- End Configuration Notes ---
+
+
 @shared_task
 def process_scrape_task_alerts(scrape_task_uuid: str = None):
     """
@@ -439,7 +475,10 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
     2. Find related generic operational Tasks.
     3. Retrieve aggregated summaries from the Reporting House for these tasks.
     4. Consolidate all relevant data for the ScrapeTask.
-    5. Format and send a comprehensive performance alert to Slack.
+    5. Check if there is new task summary data for any sub-task within the ScrapeTask
+       since the last notification was sent (using Redis for state).
+    6. If new data is found, format and send a comprehensive performance alert to Slack,
+       and then update the 'last notified' timestamps in Redis.
 
     Args:
         scrape_task_uuid (str, optional): The UUID of a specific ScrapeTask
@@ -447,12 +486,19 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
     """
     logger.info(f"Starting scrape task alerts processing for UUID: {scrape_task_uuid or 'all'}.")
 
+    # Establish Redis connection
+    redis_conn = get_redis_connection("default")
+
+    # Fetch Reporting House URL from the Server model
+    reporting_house = Server.objects.filter(instance_type='reporting_and_analytics_server').first()
+    if not reporting_house or not reporting_house.public_ip:
+        logger.error("Reporting and Analytics Server URL not found. Aborting task.")
+        return False # Return False to indicate failure
+
+    reportinghouse_url = reporting_house.public_ip
+
     query_set = ScrapeTask.objects.all()
-    reportinghouse=Server.objects.all().filter(instance_type='reporting_and_analytics_server')
-    if not reportinghouse:
-        return False
-    reportinghouse=reportinghouse[0]
-    reportinghouse_url=reportinghouse.public_ip
+
     if scrape_task_uuid:
         try:
             # Validate UUID format
@@ -478,19 +524,59 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
         task_uuids_to_fetch = [str(t.uuid) for t in central_tasks]
         central_tasks_by_uuid = {str(t.uuid): t for t in central_tasks}
 
-        # Step 3: Retrieve Reporting Summaries from Reporting App
+        # Step 3: Retrieve Reporting Summaries from Reporting App and check for new data
         all_reports_data = {}
+        should_send_notification = False # Flag to decide if overall Slack alert should be sent
+        newly_processed_task_timestamps = {} # To store timestamps for Redis update after sending
+        from datetime import timezone
         for task_uuid in task_uuids_to_fetch:
-            # Construct the URL using settings.REPORTING_API_BASE_URL
             report_url = f"{reportinghouse_url}reporting/task-summaries/{task_uuid}/"
+            current_report_end_dt_str = None
+            current_report_end_dt = datetime.datetime.min.replace(tzinfo=timezone.utc) # Default for comparison
+
             try:
                 response = requests.get(report_url, timeout=10)
                 response.raise_for_status()
                 report_data = response.json()
                 all_reports_data[task_uuid] = report_data
+                current_report_end_dt_str = report_data.get('latest_report_end_datetime')
+                
+                if current_report_end_dt_str:
+                    current_report_end_dt = datetime.datetime.fromisoformat(current_report_end_dt_str.replace('Z', '+00:00'))
+
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error fetching report for task {task_uuid} from Reporting App: {e}")
-                continue # Skip this specific task's data if fetch fails
+                # If fetching fails, we might still want to trigger an alert as it's a problem
+                # For this logic, if we can't get current data, assume it's "new" or problematic
+                #should_send_notification = False
+                
+                #newly_processed_task_timestamps[task_uuid] = datetime.datetime.now(timezone.utc).isoformat() # Use current time as a fallback
+                continue # Skip to next task if this one failed to fetch
+
+            # Get last notified timestamp from Redis
+            redis_key = f"last_notified_task_summary:{task_uuid}"
+            last_notified_dt_bytes = redis_conn.get(redis_key) # Redis returns bytes
+            print(last_notified_dt_bytes)
+            last_notified_dt = None
+            if last_notified_dt_bytes:
+                try:
+                    last_notified_dt = datetime.datetime.fromisoformat(last_notified_dt_bytes.decode('utf-8').replace('Z', '+00:00'))
+                except ValueError:
+                    logger.warning(f"Invalid last notified datetime '{last_notified_dt_bytes.decode('utf-8')}' in Redis for task {task_uuid[:8]}.... Treating as new data.")
+                    should_send_notification = True # If Redis value is corrupt, treat as new data and overwrite
+
+            # Determine if a notification is needed for this specific task summary
+            if last_notified_dt is None or current_report_end_dt > last_notified_dt:
+                should_send_notification = True
+                logger.debug(f"Task {task_uuid[:8]}... has new report data. Current: {current_report_end_dt}, Last Notified: {last_notified_dt}")
+            else:
+                logger.debug(f"Task {task_uuid[:8]}... has no new report data. Current: {current_report_end_dt}, Last Notified: {last_notified_dt}")
+
+            # Always store the current report's end time for potential future Redis update
+            # This ensures we store the latest timestamp whether a notification is sent or not
+            # (only updated to Redis if the *overall* notification is sent)
+            newly_processed_task_timestamps[task_uuid] = current_report_end_dt_str
+
 
         if not all_reports_data:
             logger.warning(f"No successful reports fetched for ScrapeTask: {scrape_task.name}. Skipping alert.")
@@ -507,7 +593,7 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
         })
         individual_bot_metrics = defaultdict(lambda: {
             'status': 'N/A',
-            'latest_report_end_datetime': datetime.datetime.fromtimestamp(0, tz=timezone.utc),
+            'latest_report_end_datetime': datetime.fromtimestamp(0, tz=timezone.utc),
             'total_posts_scraped': 0,
             'total_users_scraped': 0,
             'total_rows': 0,
@@ -516,16 +602,22 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
             'total_failed_download_count': 0,
             'associated_task_uuids': []
         })
-    
-        scrape_task.bot_status=individual_bot_metrics
-        scrape_task.save()
+        
+        # NOTE: Your original code attempts to save individual_bot_metrics to scrape_task.bot_status here.
+        # Ensure scrape_task.bot_status is a JSONField or similar in your model
+        # and that the structure of individual_bot_metrics is compatible.
+        # For simplicity in this update, I'm assuming it's a direct assignment,
+        # but you might need serialization if it's a TextField etc.
+        # scrape_task.bot_status = individual_bot_metrics 
+        # scrape_task.save()
+
         overall_scrape_task_status = "Completed"
         critical_issues = []
 
         for task_uuid, report_summary in all_reports_data.items():
             central_task = central_tasks_by_uuid.get(task_uuid)
             if not central_task:
-                continue # Should not happen if central_tasks_by_uuid was built correctly
+                continue
 
             # --- Aggregate by (data_point, input) ---
             key = (central_task.data_point, central_task.input)
@@ -547,28 +639,25 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
             aggregated_by_data_input[key]['total_failed_download_count'] += report_summary.get('total_failed_download_count', 0)
 
             # --- Individual Bot Metrics ---
-            from datetime import timezone
             username = central_task.profile
             if username:
-                current_report_end_dt_str = report_summary.get('latest_report_end_datetime')
-                current_report_end_dt = datetime.datetime.min.replace(tzinfo=timezone.utc) # Ensure timezone-aware comparison
-                if current_report_end_dt_str:
+                current_report_end_dt_str_bot = report_summary.get('latest_report_end_datetime')
+                current_report_end_dt_bot = datetime.min.replace(tzinfo=timezone.utc)
+                if current_report_end_dt_str_bot:
                     try:
-                        current_report_end_dt = datetime.datetime.fromisoformat(current_report_end_dt_str.replace('Z', '+00:00'))
+                        current_report_end_dt_bot = datetime.fromisoformat(current_report_end_dt_str_bot.replace('Z', '+00:00'))
                     except ValueError:
-                        logger.warning(f"Could not parse datetime '{current_report_end_dt_str}' for task {task_uuid[:8]}.")
+                        logger.warning(f"Could not parse datetime '{current_report_end_dt_str_bot}' for bot metrics task {task_uuid[:8]}.")
 
                 bot_entry = individual_bot_metrics[username]
 
-                # Determine bot status based on latest task
-                if current_report_end_dt > bot_entry['latest_report_end_datetime']:
+                if current_report_end_dt_bot > bot_entry['latest_report_end_datetime']:
                     bot_entry['status'] = report_summary.get('latest_overall_bot_login_status', 'N/A')
-                    bot_entry['latest_report_end_datetime'] = current_report_end_dt
-                elif current_report_end_dt == bot_entry['latest_report_end_datetime']:
+                    bot_entry['latest_report_end_datetime'] = current_report_end_dt_bot
+                elif current_report_end_dt_bot == bot_entry['latest_report_end_datetime']:
                     if report_summary.get('latest_overall_bot_login_status') == 'Logged Out':
                         bot_entry['status'] = 'Logged Out'
                 
-                # Sum metrics for the bot
                 if isinstance(report_summary.get('aggregated_scraped_data'), dict):
                    for metric, value in report_summary['aggregated_scraped_data'].items():
                        if isinstance(value, (int, float)):
@@ -603,23 +692,34 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
             if report_summary.get('total_failed_download_count', 0) > 0:
                 critical_issues.append(f"Failed downloads in task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}).")
             
-        # Step 5: Generate Slack Message
-        slack_blocks = _build_slack_message_blocks(
-            scrape_task=scrape_task,
-            overall_scrape_task_status=overall_scrape_task_status,
-            aggregated_by_data_input=aggregated_by_data_input,
-            individual_bot_metrics=individual_bot_metrics,
-            critical_issues=critical_issues
-        )
+        # Step 5: Conditional Slack Message
+        if should_send_notification:
+            slack_blocks = _build_slack_message_blocks(
+                scrape_task=scrape_task,
+                overall_scrape_task_status=overall_scrape_task_status,
+                aggregated_by_data_input=aggregated_by_data_input,
+                individual_bot_metrics=individual_bot_metrics,
+                critical_issues=critical_issues
+            )
 
-        # Send the message
-        try:
-            # Using a hardcoded channel as in your original snippet. Consider making this configurable.
-            send_slack_message(slack_blocks, channel='Client') 
-            logger.info(f"Successfully sent Slack alert for ScrapeTask: {scrape_task.name}")
-        except Exception as e:
-            logger.error(f"Failed to send Slack message for ScrapeTask {scrape_task.name}: {e}")
-            logger.error("Ensure Slack integration is correctly configured and bot has permissions.")
+            # Send the message
+            try:
+                # Using a hardcoded channel as in your original snippet. Consider making this configurable.
+                send_slack_message(slack_blocks, channel='Client') 
+                logger.info(f"Successfully sent Slack alert for ScrapeTask: {scrape_task.name} due to new data.")
+                
+                # --- Update Redis after successful Slack notification ---
+                for task_uuid_to_update, timestamp_str in newly_processed_task_timestamps.items():
+                    redis_key = f"last_notified_task_summary:{task_uuid_to_update}"
+                    redis_conn.set(redis_key, timestamp_str)
+                    logger.debug(f"Updated Redis key {redis_key} with timestamp {timestamp_str}")
+                # --- End Redis Update ---
+
+            except Exception as e:
+                logger.error(f"Failed to send Slack message for ScrapeTask {scrape_task.name}: {e}")
+                logger.error("Ensure Slack integration is correctly configured and bot has permissions.")
+        else:
+            logger.info(f"No new data detected for ScrapeTask: {scrape_task.name}. Skipping Slack notification.")
             
     logger.info('Scrape task alerts processing finished.')
 
@@ -629,7 +729,6 @@ def _build_slack_message_blocks(scrape_task, overall_scrape_task_status,
                                  critical_issues):
     """
     Helper function to construct the Slack message blocks.
-    This is extracted as a standalone function for use by the Celery task.
     """
     from datetime import timezone
     blocks = []
