@@ -642,10 +642,10 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
             username = central_task.profile
             if username:
                 current_report_end_dt_str_bot = report_summary.get('latest_report_end_datetime')
-                current_report_end_dt_bot = datetime.min.replace(tzinfo=timezone.utc)
+                current_report_end_dt_bot = datetime.datetime.min.replace(tzinfo=timezone.utc)
                 if current_report_end_dt_str_bot:
                     try:
-                        current_report_end_dt_bot = datetime.fromisoformat(current_report_end_dt_str_bot.replace('Z', '+00:00'))
+                        current_report_end_dt_bot = datetime.datetime.fromisoformat(current_report_end_dt_str_bot.replace('Z', '+00:00'))
                     except ValueError:
                         logger.warning(f"Could not parse datetime '{current_report_end_dt_str_bot}' for bot metrics task {task_uuid[:8]}.")
 
