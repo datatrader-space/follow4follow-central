@@ -593,7 +593,7 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
         })
         individual_bot_metrics = defaultdict(lambda: {
             'status': 'N/A',
-            'latest_report_end_datetime': datetime.fromtimestamp(0, tz=timezone.utc),
+            'latest_report_end_datetime': datetime.datetime.fromtimestamp(0, tz=timezone.utc),
             'total_posts_scraped': 0,
             'total_users_scraped': 0,
             'total_rows': 0,
