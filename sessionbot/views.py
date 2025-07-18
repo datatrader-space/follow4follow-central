@@ -2,12 +2,14 @@ from django.http import HttpResponse, JsonResponse, HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
-from sessionbot.resource_utils import create_resources_from_google_sheets
+from sessionbot.resource_utils import create_resources_from_google_sheets,analyze_bot_responses
 from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Log,Audience
 import json
 import requests
 import logging
 import sessionbot.handlers.scrapetask as scrapetask
+
+
 
 @csrf_exempt
 def createResource(request: HttpRequest) -> JsonResponse:
@@ -18,9 +20,15 @@ def createResource(request: HttpRequest) -> JsonResponse:
             print("Payload received:", payload)
             
             r = create_resources_from_google_sheets(**payload)
-            print("Response from create_resources_from_google_sheets:", r)
+            operation_counts = analyze_bot_responses(r)
+            # Print the results
+            results = []
+            for status, count in operation_counts.items():
+                results.append((f"{status.replace('_', ' ').title()}: {count}"))
             
-            response = {'status': 'success', 'data': r}
+            # print("Response from create_resources_from_google_sheets:", r)
+            
+            response = {'status': 'success', 'data': results}
         except json.JSONDecodeError:
             response = {'status': 'error', 'message': 'Invalid JSON payload'}
         except Exception as e:
@@ -30,6 +38,10 @@ def createResource(request: HttpRequest) -> JsonResponse:
         response = {'status': 'bad_request_type'}
     
     return JsonResponse(response)
+
+
+
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -84,15 +96,257 @@ def sync_sheet(request):
             return Response(
                 {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+# @csrf_exempt
+# def audience(request):
+#     if request.method == 'POST':
+#         from django.forms import model_to_dict
+        
+#         data = json.loads(request.body)      
+#         method=data.get('method')
+#         print(data)
+#         print(method)
+#         #print(data)
+#         if method =='get':
+#             from sessionbot.models import Audience
+#             results=[]
+#             data=data.get('data')
+#             if data.get('ids'):
+#                 for _id in data.get('ids',[]):
+#                     scrape_task_ids=[]
+#                     obj=Audience.objects.all().filter(id=_id)
+#                     if obj:
+#                         obj=obj[0]
+#                         res=model_to_dict(obj)
+#                         res.pop('scrape_tasks')
+#                         for s in obj.scrape_tasks.all():
+#                             scrape_task_ids.append(s.id)
+#                         res.update({'scrape_task_ids':scrape_task_ids})
+#                         vals=[]
+                        
+                        
+#                     else:
+#                         res=False
+#                     results.append({_id:res})
+#             else:
+                
+#                 vals=[]
+#                 scrape_task_ids=[]
+#                 for obj in Audience.objects.all():
+#                     res=model_to_dict(obj)
+#                     res.pop('scrape_tasks')
+#                     for s in obj.scrape_tasks.all():
+#                         scrape_task_ids.append({s.id:s.name})
+#                     res.update({'scrape_tasks':scrape_task_ids})
+#                     results.append({obj.id:res})
+                    
+#             print(results)
+#             return JsonResponse(results,safe=False)
+
+#         elif method=='create':
+#            logs=[]
+#            from sessionbot.models import Audience
+#            from sessionbot.handlers.audience import handle_audience_creation
+#            for row in data.get('data'):
+#             print(row)
+#             a=Audience.objects.all().filter(name=row['name'])
+#             if len(a)>0:
+#                 a=a[0]
+#                 l=Log(message='Failed to create Audience. An Audience with name '+str(row['name'])+' already exists',end_point='audience')
+#                 l.save()
+#                 logs.append('Failed to create Audience. An Audience with name '+str(row['name'])+' already exists''')
+#                 return JsonResponse({'status': 'failed','logs':logs}, status=200)
+#             else:
+#                 a=Audience()
+#                 try:
+#                     outs=handle_audience_creation(a,row)
+#                     if outs:
+#                         logs.extend(outs) 
+#                 except Exception as e:
+#                     import traceback
+#                     print(traceback.format_exc())
+#                     logs.append({'error':e,'row':row})
+#                     print(e)
+#                     a.delete()
+#                     return JsonResponse({'status': 'failed'}, status=400)
+#                 else:
+#                     logs.append({'success':row})
+#                     return JsonResponse(status=200,data={'status':'success','logs':logs})
+
+
+                    
+
+#         elif method == 'update':            
+#                 pass
+#                 l=Log(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
+#                 l.save()
+           
+#                 return JsonResponse(status=200,data={'status':'success'})
+#         elif method=='visualize':
+#             data=data.get('data')
+#             audience_id=data.get('ids')[0]
+#             session_id=data.get('session_id')
+#             from sessionbot.saver import Saver
+#             s=Saver()
+#             print(session_id)
+#             exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
+#             resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,keys=True,size=50)
+#             print(resp)
+#             print('audience has data')
+#             if not resp:           
+#                 from sessionbot.utils import DataHouseClient
+#                 from django.conf import settings
+#                 from sessionbot.models import Audience,Task
+#                 d=DataHouseClient()
+#                 a=Audience.objects.all().filter(id=audience_id)
+#                 datahouse=Server.objects.all().filter(instance_type='data_server')
+#                 if datahouse:
+#                     datahouse_url=datahouse[0].public_ip
+#                     d.base_url=datahouse_url
+#                 else:
+#                     print('datahouse not found')
+#                     return JsonResponse({'status': 'failed. Datahouse not found','data':[]}, status=200)   
+#                 print(a)
+#                 if a:
+#                     a=a[0]
+#                     a.scrape_tasks                
+#                     tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True)))
+#                     #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
+#                 if tasks:
+#                     filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),}        
+#                     required_fields=['username','info__full_name','info__gender','info__country','info__followers_count','profile_picture']     
+#                     resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False,task_uuid=tasks[0].uuid)
+#                 else:
+#                     return JsonResponse({'status': 'failed. No Scrape Tasks found for Audience','data':[]}, status=200)     
+#                 results=[]
+       
+#                 unique_usernames=[]
+#                 storagehouse=Server.objects.all().filter(instance_type='storage_house')
+#                 if storagehouse:
+#                     storagehouse_url=storagehouse[0].public_ip
+#                     storagehouse_ngrok_url=storagehouse[0].instance_id
+#                 for row in resp['data']:
+#                     if row['username'] in unique_usernames:
+#                             continue
+#                     else:
+#                         if row.get('profile_picture'):
+                            
+#                             url=storagehouse_ngrok_url+row['profile_picture']
+#                             import urllib
+#                             import re
+#                             cleaned_url = url.replace("\\", "/")
+#                             # 2. Parse the URL to handle encoding issues
+#                             parsed_url = urllib.parse.urlparse(cleaned_url)
+#                             # 3. Reconstruct the URL with proper encoding
+#                             cleaned_url = urllib.parse.urlunparse(parsed_url)
+#                             cleaned_url = re.sub(r"(?<!:)/{2,}", "/", cleaned_url)              
+#                             row['profile_picture']=cleaned_url
+#                         unique_usernames.append(row['username'])             
+#                         results.append(row)
+#                 for i in range(0, len(results), 50):
+#                     chunk = results[i:i + 50]
+#                     s.save_audience_outputs_for_session(session_id=session_id,audience_id=audience_id,data=chunk)
+#                 resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,size=50,keys=True)   
+#                 results=[]
+#                 for key,value in resp.items():          
+#                     if len(results)>=50:
+#                         break          
+#                     s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)  
+#                     results.extend(value)
+                
+#                 return JsonResponse({'status': 'success','data':results}, status=200) 
+#             else:
+#                 exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
+#                 resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,size=50,keys=True,exclude_blocks=exclude_blocks) 
+#                 if not resp:
+#                     return JsonResponse({'status': 'success','data':[]}, status=200) 
+#                 serve=[]
+#                 for key,value in resp.items():
+#                     if len(serve)>=50:
+#                         break
+#                     print('Request recieve')
+#                     if len(value)==1:
+#                         serve.append(value[0])
+#                         value[0].pop('profile_pic',False)
+#                         value[0].pop('full_name',False)
+#                     else:
+#                         for row in value:
+#                             serve.append(row)
+#                             row.pop('profile_pic',False)
+#                             row.pop('full_name',False)
+                        
+#                     s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)
+                    
+                        
+
+#                 print(session_id)
+#                 print(serve[0])
+#                 return JsonResponse({'status': 'success','data':serve}, status=200)                              
+                                    
+
+#         elif method=='save':
+#             from sessionbot.saver import Saver
+#             import base64
+#             from io import BytesIO
+#             from django.core.files import File
+#             from uuid import uuid4
+#             from django.conf import settings
+#             import os
+#             s=Saver()
+#             audience_data=data.get('data')
+#             audience_id=data.get('audience_id')
+            
+#             for row in audience_data:
+#                 print(row.get('profile_pic').keys())
+#                 file_content_b64 =row.get('profile_pic').get('file_content')
+
+#             if not file_content_b64:
+#                print('file content not found')
+#             else:
+#                 file_content = base64.b64decode(file_content_b64)
+#                 file_object = BytesIO(file_content)
+
+#                 # Generate a unique filename
+                
+#                 filename = str(uuid4()) + '.jpg'  # Assuming JPG format, adjust as needed
+
+#                 # Save the file to the media folder
+#                 file_path = os.path.join(settings.MEDIA_ROOT, filename)
+#                 print(file_path)
+#                 with open(file_path, 'wb') as f:
+#                     f.write(file_object.getvalue())
+#                     row.update({'profile_picture':filename})
+#             s.save_audience_outputs(audience_id,audience_data)
+#             return JsonResponse({'status': 'success'}, status=200)
+#         elif method == 'delete':
+#             ids = data.get('data',{}).get('ids',[])
+#             return JsonResponse({'status': 'success'}, status=200)
+#         elif method =='change_state':
+#             tasks = data.get('data',{})
+#             for task in tasks:
+#                 for key, value in task.items():
+#                     obj=Todo.objects.filter(id=key)
+#                     if obj:
+#                         obj=obj[0]
+#                         todo.handle_state_change(obj)
+           
+#         else:
+#             return JsonResponse({'status': 'failed'}, status=400)
+
+#     return HttpResponse('Method not allowed', status=405)
+
+
+
 @csrf_exempt
 def audience(request):
     if request.method == 'POST':
         from django.forms import model_to_dict
+        import json
         
         data = json.loads(request.body)      
         method=data.get('method')
         print(data)
         print(method)
+        
         #print(data)
         if method =='get':
             from sessionbot.models import Audience
@@ -130,145 +384,233 @@ def audience(request):
             print(results)
             return JsonResponse(results,safe=False)
 
-        elif method=='create':
-           logs=[]
-           from sessionbot.models import Audience
-           from sessionbot.handlers.audience import handle_audience_creation
-           for row in data.get('data'):
-            print(row)
-            a=Audience.objects.all().filter(name=row['name'])
-            if len(a)>0:
-                a=a[0]
-                l=Log(message='Failed to create Audience. An Audience with name '+str(row['name'])+' already exists',end_point='audience')
-                l.save()
-                logs.append('Failed to create Audience. An Audience with name '+str(row['name'])+' already exists''')
-                return JsonResponse({'status': 'failed','logs':logs}, status=200)
-            else:
-                a=Audience()
+        elif method == 'create':
+            logs = []
+            from sessionbot.models import Audience, Log
+            from sessionbot.handlers.audience import handle_audience_creation
+
+            # since your payload is a single object
+            general_config = data.get('generalConfig', {})
+            settings = general_config.get('settings', {})
+            name = settings.get('name')
+            
+            # Check if an Audience with this name already exists
+            existing = Audience.objects.filter(name=name)
+            if existing.exists():
+                log_msg = f"Failed to create Audience. An Audience with name {name} already exists"
+                Log(message=log_msg, end_point='audience').save()
+                logs.append(log_msg)
+                return JsonResponse({'status': 'failed', 'logs': logs}, status=200)
+            
+            # Create new Audience
+            a = Audience()
+            try:
+                outs = handle_audience_creation(a, data)
+                if outs:
+                    logs.extend(outs)
+            except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                print(error_trace)
+                logs.append({'error': str(e)})
+                # Delete partial Audience if created
                 try:
-                    outs=handle_audience_creation(a,row)
-                    if outs:
-                        logs.extend(outs) 
-                except Exception as e:
-                    import traceback
-                    print(traceback.format_exc())
-                    logs.append({'error':e,'row':row})
-                    print(e)
                     a.delete()
-                    return JsonResponse({'status': 'failed'}, status=400)
-                else:
-                    logs.append({'success':row})
-                    return JsonResponse(status=200,data={'status':'success','logs':logs})
+                except Exception:
+                    pass
+                return JsonResponse({'status': 'failed', 'logs': logs}, status=400)
 
+            logs.append({'success': f"Audience '{name}' created successfully."})
+            return JsonResponse({'status': 'success', 'logs': logs}, status=200)
+        elif method == 'update':
+            from sessionbot.models import Audience, ScrapeTask, Task, Log
+            value = data.get('data', [])
+            
+            for data_dict in value:
+                for audience_id_str, audience_data in data_dict.items():
+                    try:
+                        audience_id = int(audience_id_str)
+                        audience = Audience.objects.get(pk=audience_id)
+                    except (Audience.DoesNotExist, ValueError):
+                        Log(
+                            message=f'Failed to update Audience with id {audience_id_str}: does not exist.',
+                            end_point='audience_update',
+                            label='WARNING'
+                        ).save()
+                        continue
 
-                    
+                    # Update prompt field from ai_prompt in payload
+                    if 'ai_prompt' in audience_data:
+                        audience.prompt = audience_data['ai_prompt']
 
-        elif method == 'update':            
-                pass
-                l=Log(message='Failed to Update Todo. Object with Id doesnt exist. Data: '+str(value),end_point='todo',label='WARNING')
-                l.save()
-           
-                return JsonResponse(status=200,data={'status':'success'})
-        elif method=='visualize':
-            data=data.get('data')
-            audience_id=data.get('ids')[0]
-            session_id=data.get('session_id')
+                    # Update scrape_tasks many-to-many
+                    if 'scrapetask' in audience_data:
+                        try:
+                            task_ids = [int(tid) for tid in audience_data['scrapetask']]
+                            tasks = ScrapeTask.objects.filter(id__in=task_ids)
+                            audience.scrape_tasks.set(tasks)
+                        except ValueError:
+                            Log(
+                                message=f'Invalid scrapetask IDs: {audience_data["scrapetask"]}',
+                                end_point='audience_update',
+                                label='ERROR'
+                            ).save()
+                            continue
+
+                    audience.save()
+
+            return JsonResponse({'status': 'success'}, status=200)
+        
+        elif method == 'visualize':
+            data = data.get('data')
+            audience_id = data.get('ids')[0]
+            session_id = data.get('session_id')
+
             from sessionbot.saver import Saver
-            s=Saver()
+            s = Saver()
             print(session_id)
-            exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
-            resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,keys=True,size=50)
+
+            exclude_blocks = s.get_consumed_blocks_for_audience_for_session(
+                audience_id=audience_id, session_id=session_id
+            )
+
+            resp = s.retrieve_audience_outputs_for_session(
+                session_id, audience_id=audience_id, keys=True, size=50
+            )
             print(resp)
             print('audience has data')
-            if not resp:           
+
+            if not resp:
                 from sessionbot.utils import DataHouseClient
                 from django.conf import settings
-                from sessionbot.models import Audience,Task
-                d=DataHouseClient()
-                a=Audience.objects.all().filter(id=audience_id)
-                datahouse=Server.objects.all().filter(instance_type='data_server')
+                from sessionbot.models import Audience, Task, Server
+
+                d = DataHouseClient()
+                print("DataHouseClient created:", d)
+                print("DataHouseClient base_url:", getattr(d, 'base_url', 'NO URL SET'))
+
+                a = Audience.objects.all().filter(id=audience_id)
+                datahouse = Server.objects.all().filter(instance_type='data_server')
                 if datahouse:
-                    datahouse_url=datahouse[0].public_ip
-                    d.base_url=datahouse_url
+                    d.base_url = datahouse[0].public_ip
                 else:
                     print('datahouse not found')
-                    return JsonResponse({'status': 'failed. Datahouse not found','data':[]}, status=200)   
+                    return JsonResponse({'status': 'failed. Datahouse not found', 'data': []}, status=200)
+
                 print(a)
                 if a:
-                    a=a[0]
-                    a.scrape_tasks                
-                    tasks=Task.objects.all().filter(ref_id__in=list(a.scrape_tasks.values_list('uuid',flat=True)))
-                    #tasks=Task.objects.all().filter(ref_id=a.uuid).values_list('uuid',flat=True)
+                    a = a[0]
+                    tasks = Task.objects.all().filter(ref_id__in=list(
+                        a.scrape_tasks.values_list('uuid', flat=True)
+                    ))
+
                 if tasks:
-                    filters={'tasks__uuid.in':list(tasks.values_list('uuid',flat=True)),}        
-                    required_fields=['username','info__full_name','info__gender','info__country','info__followers_count','profile_picture']     
-                    resp=d.retrieve(object_type='profile',  filters=filters, locking_filters=None, lock_results=False,task_uuid=tasks[0].uuid)
+                    filters = {
+                        'tasks__uuid.in': list(tasks.values_list('uuid', flat=True))
+                    }
+                    required_fields = [
+                        'username',
+                        'info__full_name',
+                        'info__gender',
+                        'info__country',
+                        'info__followers_count',
+                        'profile_picture'
+                    ]
+                    resp = d.retrieve(
+                        object_type='profile',
+                        filters=filters,
+                        locking_filters=None,
+                        lock_results=False,
+                        task_uuid=tasks[0].uuid
+                    )
+                    data_list = resp.get('data', [])
+
+                    # ✅ BYPASS if data_list is empty
+                    if not data_list:
+                        return JsonResponse({'status': 'success', 'data': []}, status=200)
+
                 else:
-                    return JsonResponse({'status': 'failed. No Scrape Tasks found for Audience','data':[]}, status=200)     
-                results=[]
-       
-                unique_usernames=[]
-                storagehouse=Server.objects.all().filter(instance_type='storage_house')
+                    return JsonResponse({'status': 'failed. No Scrape Tasks found for Audience', 'data': []}, status=200)
+
+                results = []
+                unique_usernames = []
+                storagehouse = Server.objects.all().filter(instance_type='storage_server')
                 if storagehouse:
-                    storagehouse_url=storagehouse[0].public_ip
-                    storagehouse_ngrok_url=storagehouse[0].instance_id
-                for row in resp['data']:
+                    storagehouse_ngrok_url = storagehouse[0].public_ip
+                    #storagehouse_ngrok_url = storagehouse[0].instance_id
+
+                for row in data_list:
                     if row['username'] in unique_usernames:
-                            continue
+                        continue
                     else:
                         if row.get('profile_picture'):
-                            
-                            url=storagehouse_ngrok_url+row['profile_picture']
+                            url = storagehouse_ngrok_url + row['profile_picture']
                             import urllib
                             import re
                             cleaned_url = url.replace("\\", "/")
-                            # 2. Parse the URL to handle encoding issues
                             parsed_url = urllib.parse.urlparse(cleaned_url)
-                            # 3. Reconstruct the URL with proper encoding
                             cleaned_url = urllib.parse.urlunparse(parsed_url)
-                            cleaned_url = re.sub(r"(?<!:)/{2,}", "/", cleaned_url)              
-                            row['profile_picture']=cleaned_url
-                        unique_usernames.append(row['username'])             
+                            cleaned_url = re.sub(r"(?<!:)/{2,}", "/", cleaned_url)
+                            row['profile_picture'] = cleaned_url
+
+                        unique_usernames.append(row['username'])
                         results.append(row)
+
                 for i in range(0, len(results), 50):
                     chunk = results[i:i + 50]
-                    s.save_audience_outputs_for_session(session_id=session_id,audience_id=audience_id,data=chunk)
-                resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,size=50,keys=True)   
-                results=[]
-                for key,value in resp.items():          
-                    if len(results)>=50:
-                        break          
-                    s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)  
-                    results.extend(value)
-                
-                return JsonResponse({'status': 'success','data':results}, status=200) 
-            else:
-                exclude_blocks=s.get_consumed_blocks_for_audience_for_session(audience_id=audience_id,session_id=session_id)
-                resp=s.retrieve_audience_outputs_for_session(session_id,audience_id=audience_id,size=50,keys=True,exclude_blocks=exclude_blocks) 
-                if not resp:
-                    return JsonResponse({'status': 'success','data':[]}, status=200) 
-                serve=[]
-                for key,value in resp.items():
-                    if len(serve)>=50:
+                    s.save_audience_outputs_for_session(
+                        session_id=session_id, audience_id=audience_id, data=chunk
+                    )
+
+                resp = s.retrieve_audience_outputs_for_session(
+                    session_id, audience_id=audience_id, size=50, keys=True
+                )
+                results = []
+                for key, value in resp.items():
+                    if len(results) >= 50:
                         break
-                    print('Request recieve')
-                    if len(value)==1:
+                    s.add_output_block_to_consumed_blocks_for_audience_for_session(
+                        session_id=session_id, audience_id=audience_id, output_block=key
+                    )
+                    results.extend(value)
+
+                return JsonResponse({'status': 'success', 'data': results}, status=200)
+
+            else:
+                exclude_blocks = s.get_consumed_blocks_for_audience_for_session(
+                    audience_id=audience_id, session_id=session_id
+                )
+
+                resp = s.retrieve_audience_outputs_for_session(
+                    session_id, audience_id=audience_id, size=50, keys=True, exclude_blocks=exclude_blocks
+                )
+
+                if not resp:
+                    return JsonResponse({'status': 'success', 'data': []}, status=200)
+
+                serve = []
+                for key, value in resp.items():
+                    if len(serve) >= 50:
+                        break
+                    print('Request receive')
+
+                    if len(value) == 1:
                         serve.append(value[0])
-                        value[0].pop('profile_pic',False)
-                        value[0].pop('full_name',False)
+                        value[0].pop('profile_pic', False)
+                        value[0].pop('full_name', False)
                     else:
                         for row in value:
                             serve.append(row)
-                            row.pop('profile_pic',False)
-                            row.pop('full_name',False)
-                        
-                    s.add_output_block_to_consumed_blocks_for_audience_for_session(session_id=session_id,audience_id=audience_id,output_block=key)
-                    
-                        
+                            row.pop('profile_pic', False)
+                            row.pop('full_name', False)
+
+                    s.add_output_block_to_consumed_blocks_for_audience_for_session(
+                        session_id=session_id, audience_id=audience_id, output_block=key
+                    )
 
                 print(session_id)
                 print(serve[0])
-                return JsonResponse({'status': 'success','data':serve}, status=200)                              
+                return JsonResponse({'status': 'success', 'data': serve}, status=200)                               
                                     
 
         elif method=='save':
@@ -321,6 +663,11 @@ def audience(request):
             return JsonResponse({'status': 'failed'}, status=400)
 
     return HttpResponse('Method not allowed', status=405)
+
+
+
+
+
 
 @csrf_exempt
 def createDeviceResource(request: HttpRequest) -> JsonResponse:
@@ -1005,9 +1352,10 @@ def log(request):
     if request.method == 'POST':
         from sessionbot.models import Log
         data = json.loads(request.body)
-        print(data)
+        print(f"here end point : {data}")
        
         Log=Log.objects.all().filter(end_point=data.get('end_point')).order_by('-timestamp').values()
+        print(f"logs:{Log}")
         return JsonResponse(list(Log),safe=False)
     return HttpResponse('Method not allowed', status=405)
 
@@ -1075,57 +1423,86 @@ def task_actions(request):
 
             for childbot in childbots:
                 if not childbot.logged_in_on_servers:
-                    message = f"ChildBot {childbot.username} doesnt have server assigned.Skipping"
-                    log = Log.objects.create(message=message, label="Task Running Check", end_point=request.path, )
-                    log.save()
+                    message = f"ChildBot {childbot.username} doesn't have server assigned. Skipping"
+                    Log.objects.create(message=message, label="Task Running Check", end_point=request.path)
                     response_data.append({"message": message, "status": "warning"})
                     continue
-                existing_task = Task.objects.filter(service=childbot.service,data_point=action,profile=childbot.username).first()            
+
+                existing_task = Task.objects.filter(
+                    service=childbot.service,
+                    data_point=action,
+                    profile=childbot.username
+                ).first()
 
                 if existing_task and existing_task.status == 'running':
                     message = f"ChildBot {childbot.id} already running for task {existing_task.data_point}"
-                    log = Log.objects.create(message=message, label="Task Running Check", end_point=request.path, )
-                    log.save()
+                    Log.objects.create(message=message, label="Task Running Check", end_point=request.path)
                     response_data.append({"message": message, "status": "warning"})
                     continue
 
                 if existing_task and existing_task.status == 'paused':
                     existing_task.status = 'pending'
-                   
                     existing_task.save()
                     message = f"Task {existing_task.data_point} for ChildBot {childbot.id} resumed."
-                    log = Log.objects.create(message=message, label="Task Resumed", end_point=request.path, )
-                    log.save()
+                    Log.objects.create(message=message, label="Task Resumed", end_point=request.path)
                     response_data.append({"message": message, "status": "info"})
-
-
-                if not existing_task:
-                    task = Task.objects.create(service=childbot.service,end_point='interact',os='browser',interact=True, data_point=action, profile=childbot.username,uuid=uuid.uuid1(),server=childbot.logged_in_on_servers, status="pending")
+                    task = existing_task
+                elif not existing_task:
+                    task = Task.objects.create(
+                        service=childbot.service,
+                        end_point='interact',
+                        os='browser',
+                        interact=True,
+                        data_point=action,
+                        profile=childbot.username,
+                        uuid=uuid.uuid1(),
+                        server=childbot.logged_in_on_servers,
+                        server_id=childbot.logged_in_on_servers.id,
+                        status="pending",
+                        registered=False
+                    )
                     message = f"Task {action} created for ChildBot {childbot.id}."
-                    log = Log.objects.create(message=message, label="Task Created", end_point=request.path, )
-                    log.save()
+                    Log.objects.create(message=message, label="Task Created", end_point=request.path)
                     response_data.append({"message": message, "status": "success"})
                 else:
                     task = existing_task
                     task.data_point = action
                     task.status = "pending"
-                    task.save()
                     message = f"Task {action} updated for ChildBot {childbot.id}."
-                if task.server !=childbot.logged_in_on_servers:
-                    task.server=childbot.logged_in_on_servers
-                task.registered=False
-                task.save() 
+
+                # Attach reporting house info
+                add_data = task.add_data or {}
+                reporting_house_server = Server.objects.filter(instance_type='reporting_and_analytics_server').first()
+                if reporting_house_server:
+                    reporting_house_url = reporting_house_server.public_ip + 'reporting/task-reports/'
+                    add_data['reporting_house_url'] = reporting_house_url
+
+                # Attach datahouse info
+                datahouse_server = Server.objects.filter(instance_type='data_server').first()
+                if datahouse_server:
+                    datahouse_url = datahouse_server.public_ip + 'datahouse/api/consume/'
+                    add_data['datahouse_url'] = datahouse_url
+             
+
+                task.add_data = add_data
+
+                if task.server != childbot.logged_in_on_servers:
+                    task.server = childbot.logged_in_on_servers
+
+                task.registered = False
+                task.save()
+
                 log_message = f"ChildBot {childbot.username} started on {childbot.logged_in_on_servers.name} for task {action}"
-                log = Log.objects.create(message=message, label="Task Updated", end_point=request.path, )
-                log.save()
+                Log.objects.create(message=log_message, label="Task Updated", end_point=request.path)
                 response_data.append({"message": log_message, "status": "info"})
 
-
+                # Trigger background sync
                 from .tasks import sync_with_data_house_and_workers
                 sync_with_data_house_and_workers.delay()
-                log_message = f"ChildBot {childbot.id} started on {childbot.logged_in_on_servers.name} for task {action}"
-                log = Log.objects.create(message=log_message, label="Task Started", end_point=request.path, )
-                log.save()
+
+                start_log_message = f"ChildBot {childbot.id} started on {childbot.logged_in_on_servers.name} for task {action}"
+                Log.objects.create(message=start_log_message, label="Task Started", end_point=request.path)
+
             print(response_data)
             return JsonResponse({"messages": response_data}, status=200)
 

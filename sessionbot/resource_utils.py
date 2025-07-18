@@ -3,6 +3,7 @@ from celery import shared_task
 from celery.utils.log import get_task_logger
 from django.forms.models import model_to_dict
 import requests
+from sessionbot.models import Log
 
 def read_googlesheet_data(**kwargs):
     print("Entering read_googlesheet_data with kwargs:", kwargs)
@@ -86,72 +87,143 @@ def create_resources_from_google_sheets(**kwargs):
 
 
 def bot(**kwargs):
-    logs = []
+    # Removed custom 'logs' list and 'log_message' function
+    message_prefix = "Bot Function:"
+    current_logs_for_response = [] # To accumulate logs if the response still needs them
 
-    def log_message(message):
-        logs.append(message)
+    # Log entry for entering the bot function
+    message_entry = f"{message_prefix} Entering bot with kwargs: {kwargs}"
+    Log.objects.create(
+        message=message_entry,
+        label="BotProcess",
+        end_point="childbot",  # <-- Set the end_point here
+    )
+    current_logs_for_response.append(message_entry)
 
-    log_message(f"Entering bot with kwargs: {kwargs}")
     username = kwargs.get("username")
     if not username:
-        log_message("Username is missing.")
+        message_entry = f"{message_prefix} Username is missing."
+        Log.objects.create(
+            message=message_entry,
+            label="BotCreationFailed",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
         return {
             "response": "failed",
             "message": "botCreationFailed Username Missing",
             "object": None,
             "label": "UserNameNotFound",
-            "logs": logs,
+            "logs": current_logs_for_response,
         }
 
     service = kwargs.get("service")
     if not service:
-        log_message(f"Service is missing for {username}.")
+        message_entry = f"{message_prefix} Service is missing for {username}."
+        Log.objects.create(
+            message=message_entry,
+            label="BotCreationFailed",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
         return {
             "response": "failed",
             "message": f"botCreationFailed for {username} Service Missing",
             "object": None,
             "label": "ServiceNotFound",
-            "logs": logs,
+            "logs": current_logs_for_response,
         }
 
     password = kwargs.get("password")
     if not password:
-        log_message(f"Password is missing for {username}. Force Creating bot")
-        
+        message_entry = f"{message_prefix} Password is missing for {username}. Force Creating bot"
+        Log.objects.create(
+            message=message_entry,
+            label="BotWarning",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
 
     email_address = kwargs.get("email_address")
-    phone_number=kwargs.get("phone_number")
-    proxy_url=kwargs.get('proxy_url',None)
+    phone_number = kwargs.get("phone_number")
+    proxy_url = kwargs.get('proxy_url', None)
+    auth_code = kwargs.get("auth_code")
+    
     # Handle optional logged_in_on_servers field
     logged_in_on_servers = kwargs.get("logged_in_on_servers")
     server = None
-    
+
     if logged_in_on_servers:
-        log_message(f"Received Logged Value: {logged_in_on_servers}")
+        message_entry = f"{message_prefix} Received Logged Value: {logged_in_on_servers}"
+        Log.objects.create(
+            message=message_entry,
+            label="BotInfo",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
+
         from sessionbot.models import Server
         server = Server.objects.filter(name=logged_in_on_servers).first()
-        print(server)
+        print(server) # This print statement can also be logged to DB
         if not server or not server.public_ip:
-            log_message(f"Server details are missing or public IP is not found.")
+            message_entry = f"{message_prefix} Server details are missing or public IP is not found for {logged_in_on_servers}."
+            Log.objects.create(
+                message=message_entry,
+                label="ServerNotFound",
+                end_point="childbot",
+            )
+            current_logs_for_response.append(message_entry)
             server = None  # Server is optional, so no need to fail here
     else:
-        log_message("Logged_in_on_servers is missing.")
+        message_entry = f"{message_prefix} Logged_in_on_servers is missing."
+        Log.objects.create(
+            message=message_entry,
+            label="BotInfo",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
 
     # Handle optional device field
     device_serial_number = kwargs.get("device")
     device = None
     if device_serial_number:
-        log_message(f"Received device serial number: {device_serial_number}")
+        message_entry = f"{message_prefix} Received device serial number: {device_serial_number}"
+        Log.objects.create(
+            message=message_entry,
+            label="BotInfo",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
+
         from sessionbot.models import Device
         device = Device.objects.filter(serial_number=device_serial_number).first()
         if device:
-            log_message(f"Device with serial number {device_serial_number} found.")
+            message_entry = f"{message_prefix} Device with serial number {device_serial_number} found."
+            Log.objects.create(
+                message=message_entry,
+                label="DeviceInfo",
+                end_point="childbot",
+            )
+            current_logs_for_response.append(message_entry)
         else:
-            d=Device(serial_number=device_serial_number,name=device_serial_number)
+            d = Device(serial_number=device_serial_number, name=device_serial_number)
             d.save()
-            log_message(f"Failed to find device with serial number {device_serial_number}. Created new device")
+            message_entry = f"{message_prefix} Failed to find device with serial number {device_serial_number}. Created new device."
+            Log.objects.create(
+                message=message_entry,
+                label="DeviceCreated",
+                end_point="childbot",
+            )
+            current_logs_for_response.append(message_entry)
+            device = d # Assign the newly created device
     else:
-        log_message("Device is missing.")
+        message_entry = f"{message_prefix} Device is missing."
+        Log.objects.create(
+            message=message_entry,
+            label="BotInfo",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
 
     from sessionbot.models import ChildBot, EmailProvider
 
@@ -161,30 +233,45 @@ def bot(**kwargs):
         c.password = password
         c.email_address = email_address
         c.display_name = username
+        c.auth_code = auth_code
         if server:
             c.logged_in_on_servers = server
         if device:
             c.device = device
-        c.proxy_url=proxy_url
+        c.proxy_url = proxy_url
         c.save()
 
         _c = model_to_dict(c)
-       
         _c.pop("created_on")
+
         resp = {
             "response": "success",
             "message": f"bot Already Exists for {username} Duplicate",
             "object": _c,
             "label": "botAlreadyExists",
         }
-        log_message(f"bot already exists for {username}.")
+        message_entry = f"{message_prefix} bot already exists for {username}. Updated."
+        Log.objects.create(
+            message=message_entry,
+            label="BotUpdate",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
     else:
-        log_message(f"Creating a new bot for {username}.")
+        message_entry = f"{message_prefix} Creating a new bot for {username}."
+        Log.objects.create(
+            message=message_entry,
+            label="BotCreation",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
+
         c = ChildBot(
             username=username,
             display_name=username,
             password=password,
             service=service,
+            auth_code=auth_code,
             email_address=email_address,
             phone_number=phone_number,
         )
@@ -192,23 +279,28 @@ def bot(**kwargs):
             c.logged_in_on_servers = server
         if device:
             c.device = device
-        c.proxy_url=proxy_url
+        c.proxy_url = proxy_url
         c.save()
 
         _c = model_to_dict(c)
-      
         _c.pop("created_on")
 
         # Handle optional email provider
-        email_provider = kwargs.get("email_provider")
+        email_provider_val = kwargs.get("email_provider") # Renamed to avoid conflict with imported EmailProvider model
         email_password = kwargs.get("email_password")
 
         if not email_password:
-            if email_provider:
-                e = EmailProvider.objects.filter(imap_email_host=email_provider).first()
+            if email_provider_val:
+                e = EmailProvider.objects.filter(imap_email_host=email_provider_val).first()
                 if e:
                     c.email_provider = e
-                    log_message(f"Email provider found and assigned for {username}.")
+                    message_entry = f"{message_prefix} Email provider found and assigned for {username}."
+                    Log.objects.create(
+                        message=message_entry,
+                        label="EmailProviderAssigned",
+                        end_point="childbot",
+                    )
+                    current_logs_for_response.append(message_entry)
                 else:
                     resp = {
                         "response": "success",
@@ -216,7 +308,13 @@ def bot(**kwargs):
                         "object": _c,
                         "label": "EmailProviderNotExists",
                     }
-                    log_message(f"Email provider not found for {username}.")
+                    message_entry = f"{message_prefix} Email provider not found for {username}."
+                    Log.objects.create(
+                        message=message_entry,
+                        label="EmailProviderNotFound",
+                        end_point="childbot",
+                    )
+                    current_logs_for_response.append(message_entry)
             else:
                 resp = {
                     "response": "success",
@@ -224,10 +322,22 @@ def bot(**kwargs):
                     "object": _c,
                     "label": "IncompleteEmailSettings",
                 }
-                log_message(f"Email provider and password missing for {username}.")
+                message_entry = f"{message_prefix} Email provider and password missing for {username}."
+                Log.objects.create(
+                    message=message_entry,
+                    label="IncompleteEmailSettings",
+                    end_point="childbot",
+                )
+                current_logs_for_response.append(message_entry)
         else:
             c.email_password = email_password
-            log_message(f"Email password set for {username}.")
+            message_entry = f"{message_prefix} Email password set for {username}."
+            Log.objects.create(
+                message=message_entry,
+                label="EmailPasswordSet",
+                end_point="childbot",
+            )
+            current_logs_for_response.append(message_entry)
         c.save()
 
         resp = {
@@ -236,14 +346,20 @@ def bot(**kwargs):
             "object": _c,
             "label": "NewbotCreated",
         }
-        log_message(f"New bot created for {username}.")
+        message_entry = f"{message_prefix} New bot created successfully for {username}."
+        Log.objects.create(
+            message=message_entry,
+            label="BotCreatedSuccess",
+            end_point="childbot",
+        )
+        current_logs_for_response.append(message_entry)
 
-    # Send the payload to the worker URL
+    # Send the payload to the worker URL - (This part is commented out in original code)
 
+    resp["logs"] = current_logs_for_response # Assign the accumulated logs
 
-    resp["logs"] = logs
-  
     return resp
+
 
 def email_provider(**kwargs):
     print("Entering email_provider with kwargs:", kwargs)
@@ -544,3 +660,52 @@ def convert_bulk_campaign_to_workflow_for_vivide_mind_worker(**kwargs):
                 b.server = bot_campaigns_servers[0]
                 b.save()
                 print(f"Assigned server {b.server} to BulkCampaign")
+
+
+
+def analyze_bot_responses(response_data):
+    """
+    Analyzes a list of bot operation responses to count created, updated,
+    already existing, force created, and failed operations.
+
+    Args:
+        response_data (list of dict): A list of dictionaries, where each
+                                      dictionary represents a bot operation response.
+
+    Returns:
+        dict: A dictionary containing the counts of different operation statuses.
+    """
+    counts = {
+        'total_entries_processed': 0,
+        'already_existing_bots': 0,
+        'force_created_bots': 0,
+        'failed_operations': 0,
+        'created_operations': 0, # Based on the provided sample, this will likely be 0
+        'updated_operations': 0  # Based on the provided sample, this will likely be 0
+    }
+
+    counts['total_entries_processed'] = len(response_data)
+
+    for entry in response_data:
+        # Check for 'bot Already Exists' in message or label
+        if 'bot Already Exists' in entry.get('message', '') or entry.get('label') == 'botAlreadyExists':
+            counts['already_existing_bots'] += 1
+
+        # Check for 'Force Creating bot' in logs (if logs exist)
+        logs = entry.get('logs', [])
+        for log_entry in logs:
+            if 'Force Creating bot' in log_entry:
+                counts['force_created_bots'] += 1
+                break  # Only count once per entry
+
+        # Check for 'failed' status
+        if entry.get('response') != 'success':
+            counts['failed_operations'] += 1
+        # Add conditions for 'created' or 'updated' if your data had explicit indicators
+        # For example:
+        elif "successfully created" in entry.get('message', '').lower():
+            counts['created_operations'] += 1
+        elif "successfully updated" in entry.get('message', '').lower():
+            counts['updated_operations'] += 1
+
+    return counts

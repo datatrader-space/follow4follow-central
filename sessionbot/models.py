@@ -348,7 +348,7 @@ class ChildBot(BaseModel):
                                max_length=50,
                                db_index=True
                                )
-
+    auth_code = models.CharField(max_length=255, blank=True, null=True)
     customer = models.ForeignKey(Customer,
                                  null=True,
                                  blank=False,
@@ -1340,13 +1340,16 @@ class Audience(BaseModel):
     service=models.CharField(choices=SERVICES,blank=False,null=False,default='instagram',max_length=500)
     name=models.CharField(blank=False,null=False,unique=True,max_length=500)
     scrape_tasks=models.ManyToManyField(ScrapeTask,blank=False,null=False)
-    cleaning_configuration=models.JSONField(default={},blank=False,null=False)
-    enrichment_configuration=models.JSONField(default={},blank=False,null=False)
+    # cleaning_configuration=models.JSONField(default={},blank=False,null=False)
+    # enrichment_configuration=models.JSONField(default={},blank=False,null=False)
+    workflow_steps = models.JSONField(default={},blank=False,null=False)
+    prompt = models.TextField(blank=True,null=True)
     storage_configuration=models.JSONField(default={},blank=False,null=False)
     uuid=models.UUIDField(unique=True,default=uuid.uuid1())
     
     def __str__(self):
         return self.name
+    
     
 class BulkCampaign(BaseModel):
     """_summary_

@@ -722,7 +722,93 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
             logger.info(f"No new data detected for ScrapeTask: {scrape_task.name}. Skipping Slack notification.")
             
     logger.info('Scrape task alerts processing finished.')
+@shared_task
+def update_childbot_statuses():
+    logger.info("🚀 Starting Childbot login status update process.")
 
+    # Step 1: Connect to Redis
+    redis_conn = get_redis_connection("default")
+
+    # Step 2: Get Reporting House URL
+    reporting_house = Server.objects.filter(instance_type='reporting_and_analytics_server').first()
+    if not reporting_house or not reporting_house.public_ip:
+        logger.error("❌ Reporting House server not configured properly. Aborting update.")
+        return False
+
+    base_url = reporting_house.public_ip.rstrip('/') + "/reporting/task-summaries/"
+
+    # Step 3: Fetch Tasks with data_point = 'login'
+    login_tasks = Task.objects.filter(data_point='login')
+    if not login_tasks.exists():
+        logger.warning("⚠️ No login tasks found. Nothing to update.")
+        return
+
+    updated_count = 0
+
+    for task in login_tasks:
+        task_uuid = str(task.uuid)
+        redis_key = f"last_notified_bot_status:{task_uuid}"
+
+        # Step 4: Check last updated time in Redis
+        last_notified_bytes = redis_conn.get(redis_key)
+        last_notified_dt = None
+        if last_notified_bytes:
+            try:
+                last_notified_dt = datetime.datetime.fromisoformat(
+                    last_notified_bytes.decode('utf-8').replace('Z', '+00:00')
+                )
+            except ValueError:
+                logger.warning(f"⚠️ Invalid Redis timestamp for {task_uuid}, will treat as new.")
+
+        # Step 5: Fetch summary from Reporting House
+        try:
+            response = requests.get(f"{base_url}{task_uuid}/", timeout=10)
+            response.raise_for_status()
+            summary = response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Failed to fetch report for task {task_uuid}: {e}")
+            continue
+
+        # Step 6: Get latest report timestamp
+        latest_dt_str = summary.get("latest_report_end_datetime")
+        if not latest_dt_str:
+            logger.warning(f"⚠️ No report datetime in summary for task {task_uuid}")
+            continue
+
+        try:
+            latest_dt = datetime.datetime.fromisoformat(latest_dt_str.replace('Z', '+00:00'))
+        except ValueError:
+            logger.warning(f"⚠️ Invalid datetime format in report: {latest_dt_str}")
+            continue
+
+        # Step 7: Skip if report is not newer
+        if last_notified_dt is not None and latest_dt <= last_notified_dt:
+            continue
+
+        # Step 8: Match task.profile with ChildBot.username
+        if not task.profile:
+            logger.warning(f"⚠️ Task {task_uuid} has no profile. Skipping.")
+            continue
+
+        try:
+            bot = ChildBot.objects.get(username=task.profile)
+        except ChildBot.DoesNotExist:
+            logger.warning(f"⚠️ No ChildBot found for username '{task.profile}' (task {task_uuid})")
+            continue
+
+        # Step 9: Update login status
+        login_status = summary.get("latest_overall_bot_login_status", "Unknown")
+        is_logged_in = login_status.lower() == "logged in"
+
+        bot.logged_in = is_logged_in
+        bot.save(update_fields=["logged_in"])
+        updated_count += 1
+
+        # Step 10: Update Redis to avoid duplicate notifications
+        redis_conn.set(redis_key, latest_dt_str)
+        logger.info(f"✅ Updated Childbot '{bot.username}' login status to {is_logged_in} (task {task_uuid})")
+
+    logger.info(f"✅ Childbot login status update complete. {updated_count} bots updated.")
 
 def _build_slack_message_blocks(scrape_task, overall_scrape_task_status,
                                  aggregated_by_data_input, individual_bot_metrics,

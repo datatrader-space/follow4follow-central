@@ -2,9 +2,10 @@ from django.urls import path
 
 from .views import EventView,task_actions,sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
 from django.urls import path, include
-from sessionbot.models import Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign
+from sessionbot.models import Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign,INSTANCE_TYPES  
 from rest_framework import routers, serializers, viewsets
-
+from rest_framework.decorators import action
+from rest_framework.response import Response
 # Serializers define the API representation.
 class BulkCampaignSerializer(serializers.HyperlinkedModelSerializer):
     id = serializers.IntegerField(read_only=True)
@@ -35,6 +36,12 @@ class ServerViewSet(viewsets.ModelViewSet):
     queryset = Server.objects.all()
     serializer_class = ServerSerializer
 
+    @action(detail=False, methods=['get'])
+    def choices(self, request):
+        return Response({
+            'instance_type_choices': dict(INSTANCE_TYPES)
+        })
+        
 class BotSerializer(serializers.HyperlinkedModelSerializer):
     id = serializers.IntegerField(read_only=True)
     logged_in_on_servers = serializers.SlugRelatedField(
