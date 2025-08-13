@@ -31,7 +31,7 @@ def create_resources_from_google_sheets(**kwargs):
     response = []
     
     if g.open_google_sheet():
-        print(g.spreadsheet.__dict__)
+        
         from sessionbot.models import SyncedSheet
         try:
             s=SyncedSheet(spreadsheet_name=g.spreadsheet.title,google_spreadsheet_url=g.spreadsheet_url)

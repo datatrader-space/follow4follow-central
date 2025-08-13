@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Event, Server
+from .models import Event, Server,Device
 
 class ServerSerializer(serializers.ModelSerializer):
     class Meta:
@@ -12,3 +12,10 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = '__all__'
+        
+class DeviceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Device
+        fields = '__all__'
+        
+

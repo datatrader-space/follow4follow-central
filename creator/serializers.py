@@ -5,7 +5,8 @@ from .models import (
     PhoneNumberProvider, 
     AIServiceProvider,
     AppClone,
-    AccountCreationJob
+    AccountCreationJob,
+    
 )
 from sessionbot.models import Device
 from sessionbot.serializers import DeviceSerializer
@@ -58,43 +59,103 @@ class AppCloneSerializer(serializers.ModelSerializer):
         }
 
 
-class AccountCreationJobSerializer(serializers.ModelSerializer):
+# class AccountCreationJobSerializer(serializers.ModelSerializer):
    
 
-    settings = serializers.JSONField(
-        help_text="Job settings: {stop_on_failure_count: int, stop_on_success_count: int, delete_clone: bool, max_proxy_retries: int, max_accounts_per_phone_number: int, wait_time_between_each_phone_number_or_email_procurement: 'HH:MM:SS'}"
-    )
+#     settings = serializers.JSONField(
+#         help_text="Job settings: {stop_on_failure_count: int, stop_on_success_count: int, delete_clone: bool, max_proxy_retries: int, max_accounts_per_phone_number: int, wait_time_between_each_phone_number_or_email_procurement: 'HH:MM:SS'}"
+#     )
 
     
+
+#     class Meta:
+#         model = AccountCreationJob
+#         fields = '__all__'
+#         read_only_fields = ('created_on', 'status')
+#         extra_kwargs = {
+#             'email_provider': {'help_text': "ID of email provider"},
+#             'phone_provider': {'help_text': "ID of phone number provider"},
+#             'proxy_provider': {'help_text': "ID of proxy provider"},
+#             'two_fa_live_support': {'help_text': "Enable live 2FA assistance"}
+#         }
+
+#     def validate_creator_config(self, value):
+#         # Validation logic same as model validators
+#         return value
+
+#     def validate_profiling(self, value):
+#         # Validation logic same as model validators
+#         return value
+
+#     def validate_posting(self, value):
+#         # Validation logic same as model validators
+#         return value
+
+#     def validate_warmup(self, value):
+#         # Validation logic same as model validators
+#         return value
+#     def validate_settings(self, value):
+#         # Validation logic same as model validator
+#         return value
+
+class AccountCreationJobSerializer(serializers.ModelSerializer):
+    email_provider = serializers.PrimaryKeyRelatedField(
+        queryset=EmailProvider.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    phone_provider = serializers.PrimaryKeyRelatedField(
+        queryset=PhoneNumberProvider.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    proxy_provider = serializers.PrimaryKeyRelatedField(
+        queryset=ProxyProvider.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    app_clones = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=AppClone.objects.all(),
+        required=False
+    )
 
     class Meta:
         model = AccountCreationJob
-        fields = '__all__'
-        read_only_fields = ('created_on', 'status')
-        extra_kwargs = {
-            'email_provider': {'help_text': "ID of email provider"},
-            'phone_provider': {'help_text': "ID of phone number provider"},
-            'proxy_provider': {'help_text': "ID of proxy provider"},
-            'two_fa_live_support': {'help_text': "Enable live 2FA assistance"}
-        }
+        fields = [
+            'id',
+            'name',
+            'service',
+            'status',
+            'device',
+            'app_clones',
+            'email_provider',
+            'phone_provider',
+            'proxy_provider',
+            'phone_config',
+            'proxy_config',
+            'after_creation_logic',
+            'settings',
+            'two_fa_live_support',
+            'created_on',
+        ]
+        read_only_fields = ['created_on']
 
-    def validate_creator_config(self, value):
-        # Validation logic same as model validators
-        return value
+    def create(self, validated_data):
+        app_clones = validated_data.pop('app_clones', [])
+        job = AccountCreationJob.objects.create(**validated_data)
+        job.app_clones.set(app_clones)
+        return job
 
-    def validate_profiling(self, value):
-        # Validation logic same as model validators
-        return value
+    def update(self, instance, validated_data):
+        app_clones = validated_data.pop('app_clones', None)
 
-    def validate_posting(self, value):
-        # Validation logic same as model validators
-        return value
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
 
-    def validate_warmup(self, value):
-        # Validation logic same as model validators
-        return value
-    def validate_settings(self, value):
-        # Validation logic same as model validator
-        return value
+        instance.save()
 
-    
+        if app_clones is not None:
+            instance.app_clones.set(app_clones)
+
+        return instance

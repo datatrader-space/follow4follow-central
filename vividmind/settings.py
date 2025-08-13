@@ -38,6 +38,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://a8d8-2603-3-6100-250-00.ngrok-free.app/",
     "http://127.0.0.1:8000",
     "http://localhost",
+    "https://follow4follow.site/"
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
@@ -55,6 +56,7 @@ INSTALLED_APPS = [
     'django_celery_beat',
     'django_celery_results',
     'sessionbot',
+    'creator',
     'customer',
     'corsheaders',
     'rest_framework',

@@ -72,7 +72,14 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                             }
             
            
-                    
+            if data_point in [
+                "location_posts",
+                "user_info",
+            
+                ]:
+                task["add_data"].update({
+                    "datahouse_blocks":["users", "posts"]
+                })
 
 
             tasks.append(task)
@@ -115,6 +122,11 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                     datahouse_server=datahouse_server[0]
                     datahouse_url=datahouse_server.public_ip+'datahouse/api/consume/'
                     add_data.update({'datahouse_blocks':["users","posts"],"datahouse_url":datahouse_url})
+                storagehouse = Server.objects.all().filter(instance_type='storage_server')
+                if storagehouse:
+                    
+                    storagehouse =storagehouse[0].public_ip
+                    add_data.update({'storage_house_url':storagehouse})
                 t.add_data=add_data
                 t.save()
 
@@ -182,6 +194,7 @@ def handle_filter_creation_for_scrapetask(scrapetask):
                 end_point='location'
                 if 'posts' in input:
                     data_point='location_posts'
+                    
                     filters['posts__location__rest_id.in']=[]
                 
                 location_ids.append(input.split('__')[1])
@@ -210,5 +223,7 @@ def handle_filter_creation_for_scrapetask(scrapetask):
         filters['following__following__username.in']=usernames
     if keywords:
         filters['posts__text__content.contains']=keywords
+        
+    
     print(filters)    
     return filters

@@ -232,14 +232,15 @@ def validate_settings_config(value):
         raise ValidationError("delete_clone must be a boolean")
     
     # Validate time format
-    time_key = 'wait_time_between_each_phone_number_or_email_procurement'
+    time_key = 'wait_time_between_each_phone_number_or_email_procur ement'
     if not re.match(r'^\d{2}:\d{2}:\d{2}$', value.get(time_key, '')):
         raise ValidationError(f"{time_key} must be in HH:MM:SS format")
+     
 class AccountCreationJob(models.Model):
-    STATUS_CHOICES = [
+    STATUS_CHOICES = [ 
         ('pending', 'Pending'),
         ('running', 'Running'),
-        ('completed', 'Completed'),
+        ('completed', 'Completed'),  
         ('failed', 'Failed'),
         ('paused', 'Paused'),
     ]
@@ -306,13 +307,13 @@ class AccountCreationJob(models.Model):
         default=dict,
         help_text="Phone provider configuration (country, city, etc.)",
         blank=True,
-        validators=[validate_phone_config]
+        # validators=[validate_phone_config]
     )
     proxy_config = models.JSONField(
         default=dict,
         help_text="Proxy provider configuration (country, city, etc.)",
         blank=True,
-        validators=[validate_proxy_config]
+        #validators=[validate_proxy_config]
     )
     
     # After-creation logic (sequence of operations)
@@ -320,14 +321,14 @@ class AccountCreationJob(models.Model):
         default=list,
         help_text="Sequence of operations to perform after account creation",
         blank=True,
-        validators=[validate_after_creation_logic]
+        #validators=[validate_after_creation_logic]
     )
 
     settings = models.JSONField(
         default=dict,
         help_text="Job execution settings",
         blank=True,
-        validators=[validate_settings_config]
+        #validators=[validate_settings_config]
     )
     two_fa_live_support = models.BooleanField(
         default=False,

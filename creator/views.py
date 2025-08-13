@@ -59,15 +59,43 @@ from rest_framework import viewsets
 from .models import AccountCreationJob
 from .serializers import AccountCreationJobSerializer
 
+# class AccountCreationJobViewSet(viewsets.ModelViewSet):
+#     queryset = AccountCreationJob.objects.select_related(
+   
+#         'email_provider',
+#         'phone_provider',
+#         'proxy_provider'
+#     ).all()
+#     serializer_class = AccountCreationJobSerializer
+#     filterset_fields = ['status', 'two_fa_live_support']
+#     search_fields = ['name', 'creator_config', 'profiling', 'posting', 'warmup']
+#     ordering_fields = ['created_on', 'name']
+#     ordering = ['-created_on']
+from rest_framework.response import Response
+from rest_framework import status
+import pprint  # optional, for prettier output
+
 class AccountCreationJobViewSet(viewsets.ModelViewSet):
     queryset = AccountCreationJob.objects.select_related(
-   
-        'email_provider',
-        'phone_provider',
-        'proxy_provider'
+        'email_provider', 'phone_provider', 'proxy_provider'
     ).all()
     serializer_class = AccountCreationJobSerializer
     filterset_fields = ['status', 'two_fa_live_support']
     search_fields = ['name', 'creator_config', 'profiling', 'posting', 'warmup']
     ordering_fields = ['created_on', 'name']
     ordering = ['-created_on']
+
+    def create(self, request, *args, **kwargs):
+        # Print the incoming payload
+        print("📥 Incoming Payload:")
+        pprint.pprint(request.data)
+        serializer = AccountCreationJobSerializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        else:
+            # Log the detailed serializer errors
+            print("❌ Validation Errors:", serializer.errors)
+
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

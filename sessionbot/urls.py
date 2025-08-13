@@ -1,8 +1,8 @@
 from django.urls import path
 
-from .views import EventView,task_actions,sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
+from .views import  update_task_status,fetch_task_summaries_view,EventView,task_actions,sync_sheet,todo,log,audience, bulk_campaign,scrape_task, createProxyResource, createResource, createDeviceResource, deleteDeviceResource, deleteProxyResource, attendance_task
 from django.urls import path, include
-from sessionbot.models import Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign,INSTANCE_TYPES  
+from sessionbot.models import TaskErrorSummary,Audience,ChildBot,Server,Device,CampaignTextContent,Proxy,Settings,Sharing,ScrapeTask, Task,Todo,BulkCampaign,INSTANCE_TYPES  
 from rest_framework import routers, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -88,6 +88,15 @@ class TaskSerializer(serializers.ModelSerializer):
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all()
     serializer_class = TaskSerializer
+
+class TaskErrorSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskErrorSummary
+        fields = '__all__'
+
+class TaskErrorSummaryViewSet(viewsets.ModelViewSet):
+    queryset = TaskErrorSummary.objects.all()
+    serializer_class = TaskErrorSummarySerializer
     
 class MessagingSerializer(serializers.HyperlinkedModelSerializer):
     id = serializers.IntegerField(read_only=True)
@@ -177,6 +186,8 @@ router.register(r'todo',TodoViewSet)
 router.register(r'bulkcampaign', BulkCampaignViewSet)
 router.register(r'audience',AudienceViewSet)
 router.register(r'tasks', TaskViewSet)
+router.register(r'errors',TaskErrorSummaryViewSet)
+
 
 
 urlpatterns = [
@@ -196,5 +207,9 @@ urlpatterns = [
     path('api/tasks/action/',task_actions,name='task_actions'),
     path('api/audience/',audience,name='audience'),
     path('api/event/', EventView.as_view(), name='receive_event'),
-
+    path('api/resource/reporting/',fetch_task_summaries_view,name='fetch_summ'),
+    
+    path("api/task-errors-resolved/", update_task_status, name="task-errors-resolved"),
+    
+    
 ]

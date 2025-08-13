@@ -3,7 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets,analyze_bot_responses
-from .models import BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Log,Audience
+from .models import TaskErrorSummary,BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Log,Audience
 import json
 import requests
 import logging
@@ -1482,6 +1482,12 @@ def task_actions(request):
                 if datahouse_server:
                     datahouse_url = datahouse_server.public_ip + 'datahouse/api/consume/'
                     add_data['datahouse_url'] = datahouse_url
+                    
+                # Attach Storagehouse info
+                storage_server = Server.objects.filter(instance_type='storage_server').first()
+                if storage_server:
+                    storage_url = storage_server.public_ip + 'storagehouse/api/upload'
+                    add_data['storage_house_url'] = storage_url
              
 
                 task.add_data = add_data
@@ -1513,3 +1519,330 @@ def task_actions(request):
             return JsonResponse({"error": str(e)}, status=500)
     else:
         return JsonResponse({"error": "Method Not Allowed"}, status=405)
+    
+
+import os
+import uuid
+import json
+import requests
+
+from io import StringIO
+from django.conf import settings
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.views.decorators.csrf import csrf_exempt
+from collections import defaultdict
+from .models import Task, Server
+
+
+@csrf_exempt
+def fetch_task_summaries_view(request):
+    if request.method != "POST":
+        return HttpResponseBadRequest("Only POST method is allowed")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+    object_type = payload.get("object_type")
+    bot_type = payload.get("bot_type")
+    selected_objects = payload.get("selected_objects", [])
+
+    if not selected_objects:
+        return JsonResponse({"error": "No selected_objects provided"}, status=400)
+
+    task_map = {}
+
+    if object_type == "scrape_task":
+        from sessionbot.models import ScrapeTask
+        scrape_qs = ScrapeTask.objects.filter(id__in=selected_objects)
+        for scrape_task in scrape_qs:
+            task_map[str(scrape_task.uuid)] = scrape_task.name or str(scrape_task.uuid)
+
+    elif object_type == "bots":
+        from sessionbot.models import ChildBot, Task
+
+        if bot_type == "browser_profile":
+            childbots = ChildBot.objects.filter(id__in=selected_objects)
+            for childbot in childbots:
+                username = childbot.username
+                task = (
+                    Task.objects
+                    .filter(profile=username, os="browser")
+                    .exclude(status="pending")
+                    .order_by("-created_at")
+                    .first()
+                )
+                if task:
+                    task_map[str(task.uuid)] = username
+
+        elif bot_type == "android":
+            from sessionbot.models import Task
+            task_qs = Task.objects.filter(id__in=selected_objects)
+            for task in task_qs:
+                bot_name = getattr(task, 'profile', None) or str(task.uuid)
+                task_map[str(task.uuid)] = bot_name
+        else:
+            return JsonResponse({"error": "Unsupported bot_type"}, status=400)
+    else:
+        return JsonResponse({"error": "Unsupported object_type"}, status=400)
+
+    from sessionbot.models import Server, Task
+
+    reporting_server = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
+    if not reporting_server:
+        return JsonResponse({"error": "Reporting server not found"}, status=500)
+    analytics = reporting_server.public_ip
+
+    if object_type == "scrape_task":
+        from collections import defaultdict
+        input_wise = defaultdict(lambda: {
+            "Total Users Scraped": 0,
+            "Total Downloaded Files": 0,
+            "Total Storage Uploads": 0,
+            "Failed to Download File Count": 0,
+            "Found Next Page Info Count": 0,
+            "Next Page Info Not Found Count": 0,
+            "Has Next Page Info": None,
+            "Failed Downloads Details": [],
+            "Storage Upload Failed": False,
+            "Task Completion Status": "Unknown",
+        })
+
+        bot_wise = defaultdict(lambda: {
+            "Total Challenges Encountered": 0,
+            "Current Login Status": "Unknown",
+            "Total Login Attempts": 0,
+            "Total Scrapes": 0,
+            "Total Api Requests": 0,
+        })
+
+        for task_uuid, task_name in task_map.items():
+            tasks = Task.objects.filter(ref_id=task_uuid)
+            for task in tasks:
+                try:
+                    url = analytics + f"reporting/task-summaries/{task.uuid}/"
+                    response = requests.get(url, timeout=10)
+                    if response.status_code != 200:
+                        print(f"Warning: Got status {response.status_code} from {url}")
+                        continue
+
+                    summary = response.json()
+
+                    input_name = getattr(task, "input", "Unknown Input")
+                    bot_name = getattr(task, "profile", "Unknown Bot")
+
+                    input_report = input_wise[input_name]
+                    input_report["Total Users Scraped"] += summary.get("total_users_scraped", 0)
+                    input_report["Total Downloaded Files"] += summary.get("total_downloaded_files", 0)
+                    input_report["Total Storage Uploads"] += summary.get("total_storage_uploads", 0)
+                    input_report["Failed to Download File Count"] += summary.get("failed_to_download_file_count", 0)
+                    input_report["Found Next Page Info Count"] += summary.get("found_next_page_info_count", 0)
+                    input_report["Next Page Info Not Found Count"] += summary.get("next_page_info_not_found_count", 0)
+                    input_report["Failed Downloads Details"].extend(summary.get("failed_downloads_details", []))
+                    input_report["Storage Upload Failed"] = input_report["Storage Upload Failed"] or summary.get("storage_upload_failed", False)
+
+                    current_status = input_report["Task Completion Status"]
+                    new_status = summary.get("task_completion_status", current_status)
+                    if current_status == "Unknown" or current_status == "Completed Successfully":
+                        input_report["Task Completion Status"] = new_status
+
+                    if input_report["Has Next Page Info"] is None:
+                        input_report["Has Next Page Info"] = summary.get("has_next_page_info", None)
+
+                    bot_report = bot_wise[bot_name]
+                    bot_report["Total Challenges Encountered"] += summary.get("challenges_encountered", 0)
+                    bot_report["Total Login Attempts"] += summary.get("total_login_attempts", 0)
+                    bot_report["Total Scrapes"] += summary.get("total_users_scraped", 0)
+                    bot_report["Total Api Requests"] += summary.get("total_api_requests", 0)
+
+                except requests.RequestException as e:
+                    print(f"RequestException for task {task.uuid}: {e}")
+                    continue
+
+        # Gather all scrape_task UUIDs selected (as strings) once for filtering
+        selected_scrape_uuids = set(task_map.keys())
+
+        for bot_name in bot_wise:
+            try:
+                # Filter Tasks with profile=bot_name AND ref_id in selected scrape task UUIDs
+                latest_task = Task.objects.filter(
+                    profile=bot_name,
+                    ref_id__in=selected_scrape_uuids
+                ).order_by("-created_at").first()
+
+                if not latest_task:
+                    print(f"No latest task found for bot '{bot_name}' with selected scrape tasks")
+                    continue
+
+                url = analytics + f"reporting/task-summaries/{latest_task.uuid}/"
+                response = requests.get(url, timeout=10)
+                if response.status_code != 200:
+                    print(f"Failed to fetch summary for latest task {latest_task.uuid} with status {response.status_code}")
+                    continue
+
+                summary = response.json()
+                print(f"Summary for bot '{bot_name}' from task {latest_task.uuid}: {summary}")
+
+                new_login_status = summary.get("latest_login_status", "Unknown")
+                if new_login_status == "success":
+                    bot_wise[bot_name]["Current Login Status"] = "Logged In"
+                else:
+                    bot_wise[bot_name]["Current Login Status"] = new_login_status
+            except requests.RequestException as e:
+                print(f"RequestException fetching login status for bot '{bot_name}': {e}")
+            except Exception as e:
+                print(f"Unexpected error updating login status for bot '{bot_name}': {e}")
+        return JsonResponse({
+            "InputWiseReporting": dict(input_wise),
+            "BotWiseReporting": dict(bot_wise),
+        })
+
+    elif object_type == "bots":
+        summaries = []
+        for task_uuid, task_name in task_map.items():
+            tasks = Task.objects.filter(uuid=task_uuid)
+            if not tasks.exists():
+                # Task not found case
+                summaries.append({
+                    "Bot Name": task_name,
+                    "Error": "Task Not Found"
+                })
+                continue
+
+            for task in tasks:
+                try:
+                    url = analytics + f"reporting/task-summaries/{task.uuid}/"
+                    response = requests.get(url, timeout=10)
+                    if response.status_code != 200:
+                        summaries.append({
+                            "Bot Name": task_name,
+                            "Error": "Report Not Found"
+                        })
+                        continue
+
+                    summary = response.json()
+                    if not summary:
+                        summaries.append({
+                            "Bot Name": task_name,
+                            "Error": "Report Not Found"
+                        })
+                        continue
+
+                    summaries.append({
+                        "Bot Name": task_name,
+                        "Failed Logins": summary.get("failed_logins", 0),
+                        "Total Reports Considered": summary.get("total_reports_considered", 0),
+                        "Latest Login Status": summary.get("latest_login_status", ""),
+                        "Total Login Time": summary.get("total_login_time", 0.0),
+                        "Total Login Attempts": summary.get("total_login_attempts", 0),
+                        "Total 2FA Attempts": summary.get("total_2fa_attempts", 0),
+                        "Total 2FA Failures": summary.get("total_2fa_failures", 0),
+                        "Total 2FA Success": summary.get("total_2fa_successes", 0),
+                        "Attempt Failed Reason": summary.get("attempt_failed_errors", []),
+                        "Critical Events": [event.get("type") for event in summary.get("critical_events_summary", [])],
+                    })
+                except requests.RequestException:
+                    summaries.append({
+                        "Bot Name": task_name,
+                        "Error": "Report Not Found"
+                    })
+
+        return JsonResponse({
+            "Summaries": summaries
+        })
+
+    else:
+        return JsonResponse({"error": "Unsupported object_type"}, status=400)
+    
+    
+    
+    
+    
+    
+    
+from django.db import transaction
+
+@csrf_exempt
+def update_task_status(request):
+    """
+    Updates the status of a single bot task based on its UUID.
+    This view now exclusively uses 'task_uuid' for identification.
+    """
+    if request.method != "POST":
+        return HttpResponseBadRequest("Only POST method is allowed.")
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+    task_uuid = data.get("task_uuid")
+    status = data.get("status")
+    print(status)
+    print(f"here is the Task uuid: {task_uuid}")
+
+    if not task_uuid or not status:
+        return JsonResponse(
+            {"error": "Request must include both 'task_uuid' and 'status'."},
+            status=400
+        )
+    
+    if status.lower() not in ['pending', 'resolved']:
+        return JsonResponse(
+            {"error": "Status must be either 'pending' or 'resolved'."},
+            status=400
+        )
+
+    tasks_updated = 0
+    errors_updated = 0
+
+    try:
+        with transaction.atomic():
+            if status.lower() == "resolved":
+                tasks_updated = Task.objects.filter(uuid=task_uuid).update(status="pending")
+            else:
+                tasks_updated = Task.objects.filter(uuid=task_uuid).update(status="failed")
+            errors_updated = TaskErrorSummary.objects.filter(task_uuid=task_uuid).update(issue_status=status)
+
+            if tasks_updated == 0:
+                return JsonResponse(
+                    {"error": f"No task found with UUID: {task_uuid}"},
+                    status=404
+                )
+    except Exception as e:
+        return JsonResponse({"error": f"A server error occurred: {str(e)}"}, status=500)
+
+    print(tasks_updated)
+    # --- Send POST request to reporting server here ---
+
+    # Get reporting server IP
+    reporting_server = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
+    if reporting_server:
+        analytics_base = reporting_server.public_ip
+ 
+        summary_url = analytics_base + "reporting/task-summaries/update/"
+
+        payload = {
+            "task_uuid": str(task_uuid),
+            "status": status.lower()
+        }
+        headers = {"Content-Type": "application/json"}
+
+        try:
+            response = requests.post(summary_url, headers=headers, data=json.dumps(payload), timeout=10)
+            response.raise_for_status()
+            print(f"Reported status update to external server: {response.json()}")
+        except requests.exceptions.RequestException as e:
+            # You may want to log this error properly instead of print
+            print(f"Failed to notify reporting server: {e}")
+
+    else:
+        print("Reporting server not configured or found.")
+
+    return JsonResponse({
+        "message": "Status updated successfully.",
+        "task_uuid": task_uuid,
+        "tasks_updated_count": tasks_updated,
+        "error_summaries_updated_count": errors_updated,
+    })

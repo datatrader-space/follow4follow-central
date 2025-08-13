@@ -1,7 +1,9 @@
 from django.contrib import admin
-from sessionbot.models import SyncedSheet,Workflow,Job,DataHouseSyncStatus,Audience,Log,TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings, Task,Todo
+from sessionbot.models import Issue,TaskErrorSummary,SyncedSheet,Workflow,Job,DataHouseSyncStatus,Audience,Log,TargetSettings,BulkCampaign,Sharing,ChildBot,EmailProvider,Device,ScrapeTask,Server,Proxy,DemoGraphic,CampaignTextContent,Settings, Task,Todo
 import json
 admin.site.register(Workflow)
+admin.site.register(TaskErrorSummary)
+admin.site.register(Issue)
 admin.site.register(Job)
 admin.site.register(EmailProvider)
 admin.site.register(TargetSettings)
@@ -77,9 +79,22 @@ class BulkCampaignAdmin(admin.ModelAdmin):
     filter_horizontal = ('childbots','devices','scrape_tasks','proxies')
 
 # Register your models here.
+# class ScrapeTaskAdmin(admin.ModelAdmin):
+#     filter_horizontal =('childbots',)
+# admin.site.register(ScrapeTask,ScrapeTaskAdmin)
+@admin.register(ScrapeTask)
 class ScrapeTaskAdmin(admin.ModelAdmin):
-    filter_horizontal =('childbots',)
-admin.site.register(ScrapeTask,ScrapeTaskAdmin)
+    list_display = (
+        'name',
+        'uuid',  
+        'service',
+        'customer',
+        'internal_state',
+        'os',
+        
+    )
+    filter_horizontal = ('childbots',)
+
 admin.site.register(BulkCampaign,BulkCampaignAdmin)
 admin.site.register(Proxy)
 admin.site.register(DemoGraphic)

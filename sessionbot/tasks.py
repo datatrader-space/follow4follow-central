@@ -233,6 +233,9 @@ def communicate_tasks_with_worker():
 
         import datetime as dt
         print('sent request to worker at'+worker_tasks_url +str(dt.datetime.now()))
+        
+        
+        
 def send_comand_to_instance(instance_id, data, model_config=None):
     """Send a command to an Instance.
 
@@ -288,125 +291,162 @@ def send_comand_to_instance(instance_id, data, model_config=None):
 
     return result
 @shared_task()
-def analyze_and_create_update_metrics_for_bots():
+def analyze_and_create_update_metrics_for_scrapetask():
+    import requests
     from django.db.models import Q
-    for bot in ChildBot.objects.all().filter(service='instagram'):
-        scraped_so_far=0
-        successful_api_requests=0
-        block_api_requests=0
-        failed_api_requests=0
-        scraped_so_far=0
-        print(bot.username)
-        tasks=Task.objects.all().filter(profile=bot.username).filter(service=bot.service)
-        scraping_tasks=tasks.filter(interact=False)
-        automation_tasks=tasks.filter(interact=True)
-        login_tasks=tasks.filter(Q(data_point='login')|Q(data_point='open_browser_profile'))
-        from sessionbot.utils import DataHouseClient
-        d=DataHouseClient()
-        if len(scraping_tasks.filter(paused=False))>0:
-            bot.is_scraper=True
-        print(list(tasks.values_list('uuid',flat=True)))
-        failed_login_logs_with_datetime=d.retrieve(object_type='log',filters={'task__uuid.in':list(tasks.values_list('uuid',flat=True)),'type.equal':'failed_login'},required_fields=['datetime','bot_username','type'])
-        print(failed_login_logs_with_datetime)
-        sucessful_login_logs_with_datetime=d.retrieve(object_type='log',filters={'task__uuid.in':list(tasks.values_list('uuid',flat=True)),'type.equal':'successful_login'},required_fields=['datetime','bot_username','type'])
-        print(sucessful_login_logs_with_datetime)
-        import pandas as pd
-        df1=pd.DataFrame(data=failed_login_logs_with_datetime['data'])
-        df2=pd.DataFrame(data=sucessful_login_logs_with_datetime['data'])
-  
-        if df1.empty and not df2.empty:
-            bot.logged_in=True
-            bot.save()
-        elif df2.empty and not df1.empty:
-            bot.logged_in=False
-            bot.save()
-        elif df1.empty and df2.empty:
-            pass
-        else:
-            latest_fail = pd.to_datetime(df1['datetime'], errors='coerce').max()
-            latest_success = pd.to_datetime(df2['datetime'], errors='coerce').max()
-            if pd.isnull(latest_fail) and not(pd.isnull(latest_success)):
-                bot.logged_in=True
-                bot.save()
-            elif pd.isnull(latest_success) and not (pd.isnull(latest_fail)):
-                bot.logged_in=False
-                bot.save()
-            elif pd.isnull(latest_fail):
-                bot.logged_in=True
-            elif pd.isnull(latest_success):
-                bot.logged_in=False
-            elif latest_fail > latest_success:
-                bot.logged_in=False
-            else:
-                bot.logged_in=True
-            bot.save()
-        scraped_so_far_by_bot_payload = {
-        "object_type": "profile",  # Replace with your object type
-        "filters": {"tasks__uuid.in":list(scraping_tasks.values_list('uuid',flat=True))}, # Correct sum syntax
-       
-         "count":True # Optional
-}       
-        scraped_so_far=d.retrieve(**scraped_so_far_by_bot_payload)
-        if type(scraped_so_far)==dict:
-            bot.scraped_so_far=scraped_so_far.get('count',0)
-            bot.save()
-        successful_api_requests= {
-        "object_type": "requestlog",  # Replace with your object type
-        "filters": {"task__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[200]}, # Correct sum syntax
-       
-         "count":True # Optional
-}   
-        successful_api_requests=d.retrieve(**successful_api_requests)
-        if type(successful_api_requests)==dict:
-            bot.successful_api_requests=successful_api_requests['count']
-            bot.save()
-        failed_api_requests= {
-        "object_type": "requestlog",  # Replace with your object type
-        "filters": {"task__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"status_code.in":[400,500,401]}, # Correct sum syntax
-       
-         "count":True # Optional
-}   
-        failed_api_requests=d.retrieve(**failed_api_requests)
-        if type(failed_api_requests)==dict:
-            bot.failed_api_requests=failed_api_requests['count']
-            bot.save()
-        block_api_requests= {
-        "object_type": "requestlog",  # Replace with your object type
-        "filters": {"task__uuid.in":list(scraping_tasks.values_list('uuid',flat=True)),"data__status":"fail"}, # Correct sum syntax
-        
-         "count":True # Optional
-}   
-        block_api_requests=d.retrieve(**block_api_requests)
-        if type(block_api_requests)==dict:
-            if block_api_requests.get('count',0)>0:
-                
-                bot.is_challenged=True 
-            else:
-                bot.is_challenged=False
-            bot.save()
+    from sessionbot.utils import DataHouseClient
+    from sessionbot.models import ScrapeTask, Task, Server
+
+    # --- Data Server Metrics ---
+    d = DataHouseClient()
+    data_server = Server.objects.filter(instance_type='data_server').first()
+    if not data_server:
+        print("❌ Data server not found.")
+        return
+    d.base_url = data_server.public_ip
+
+    # Reporting Server
+    reporting_server = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
+    if not reporting_server:
+        print("❌ Reporting server not found.")
+        return
+    analytics_base_url = reporting_server.public_ip
 
     for scrapetask in ScrapeTask.objects.all():
-        successful_api_requests=0
-        failed_api_requests=0
-        blocks_encountered=0
-        scraped_so_far=0
-        bot_status={}
-        for bot in scrapetask.childbots.all():
-         
-            scraped_so_far+=bot.scraped_so_far
-            failed_api_requests+=bot.failed_api_requests
-            successful_api_requests+=bot.successful_api_requests
-            bot_status.update({bot.username+'_is_challenged':bot.is_challenged})
-      
-        scrapetask.successful_request_count=successful_api_requests
-        scrapetask.failed_request_count=failed_api_requests
-        scrapetask.scraped_so_far=scraped_so_far
-        scrapetask.requests_sent=successful_api_requests+failed_api_requests
-        scrapetask.bot_status=bot_status
+        scraping_tasks = Task.objects.filter(ref_id=scrapetask.uuid)
+        task_uuids = list(scraping_tasks.values_list('uuid', flat=True))
+
+        if not task_uuids:
+            continue
+
+        # --- Existing Data Server Counts ---
+        scraped_so_far_payload = {
+            "object_type": "profile",
+            "filters": {"tasks__uuid.in": task_uuids},
+            "count": True
+        }
+        scraped_so_far = d.retrieve(**scraped_so_far_payload)
+        if isinstance(scraped_so_far, dict):
+            scrapetask.scraped_so_far = scraped_so_far.get('count', 0)
+
+        successful_payload = {
+            "object_type": "requestlog",
+            "filters": {"task__uuid.in": task_uuids, "status_code.in": [200]},
+            "count": True
+        }
+        successful_api_requests = d.retrieve(**successful_payload)
+        if isinstance(successful_api_requests, dict):
+            scrapetask.successful_request_count = successful_api_requests.get('count', 0)
+
+        failed_payload = {
+            "object_type": "requestlog",
+            "filters": {"task__uuid.in": task_uuids, "status_code.in": [400, 500, 401]},
+            "count": True
+        }
+        failed_api_requests = d.retrieve(**failed_payload)
+        if isinstance(failed_api_requests, dict):
+            scrapetask.failed_request_count = failed_api_requests.get('count', 0)
+
+        block_payload = {
+            "object_type": "requestlog",
+            "filters": {"task__uuid.in": task_uuids, "data__status": "fail"},
+            "count": True
+        }
+        block_api_requests = d.retrieve(**block_payload)
+        if isinstance(block_api_requests, dict):
+            scrapetask.blocks_encountered = block_api_requests.get('count', 0)
+
+        # --- New Reporting Server Metrics ---
+        total_downloaded_files = 0
+        total_storage_uploads = 0
+        missing_summaries = []
+
+        bot_status = {}
+
+        for task_uuid in task_uuids:
+            try:
+                summary_url = analytics_base_url + f"reporting/task-summaries/{task_uuid}/"
+                resp = requests.get(summary_url, timeout=10)
+
+                if resp.status_code != 200:
+                    print(f"⚠ Failed to fetch summary for task {task_uuid} - {resp.status_code}")
+                    missing_summaries.append(task_uuid)
+                    continue
+
+                summary = resp.json()
+                total_downloaded_files += summary.get("total_downloaded_files", 0)
+                total_storage_uploads += summary.get("total_storage_uploads", 0)
+
+                task_obj = scraping_tasks.filter(uuid=task_uuid).first()
+                if task_obj:
+                    bot_name = task_obj.profile
+                    latest_login_status = summary.get("latest_login_status", "unknown")
+
+                    if latest_login_status == "success":
+                        status_to_store = "Logged In"
+                    else:
+                        status_to_store = latest_login_status
+
+                    bot_status[bot_name] = status_to_store
+
+            except Exception as e:
+                print(f"❌ Error fetching summary for {task_uuid}: {e}")
+                missing_summaries.append(task_uuid)
+                continue
+
+        scrapetask.media_downloaded = total_downloaded_files
+        scrapetask.media_stored = total_storage_uploads
+
+        if bot_status:
+            scrapetask.bot_status = bot_status
+
         scrapetask.save()
-        pass
 
+        print(f"✅ Updated metrics for ScrapeTask {scrapetask.uuid}")
+        if missing_summaries:
+            print(f"❌ Missing summaries for UUIDs: {missing_summaries}")
+            
+    # --- Update all Tasks status based on their summary ---
+    all_tasks = Task.objects.all()
+    missing_summaries_for_tasks = []
 
+    for task in all_tasks:
+        try:
+            summary_url = f"{analytics_base_url}reporting/task-summaries/{task.uuid}/"
+            resp = requests.get(summary_url, timeout=10)
+
+            if resp.status_code != 200:
+                print(f"⚠ Failed to fetch summary for task {task.uuid} - {resp.status_code}")
+                missing_summaries_for_tasks.append(task.uuid)
+                continue
+
+            summary = resp.json()
+
+            # Determine which status to use based on task.data_point
+            if task.data_point == "login":
+                raw_status = summary.get("latest_task_status")
+            else:
+                raw_status = summary.get("task_completion_status")
+
+            if raw_status:
+                # Normalize status mapping
+                normalized_status = raw_status.strip().lower()
+                if normalized_status in ["success", "completed successfully"]:
+                    mapped_status = "completed"
+                else:
+                    mapped_status = "failed"
+
+                if mapped_status != task.status:
+                    task.status = mapped_status
+                    task.save(update_fields=["status"])
+
+        except Exception as e:
+            print(f"❌ Error fetching summary for task {task.uuid}: {e}")
+            missing_summaries_for_tasks.append(task.uuid)
+            continue
+
+    if missing_summaries_for_tasks:
+        print(f"❌ Missing summaries for task UUIDs: {missing_summaries_for_tasks}")
 
 # central/tasks.py (or similar path in your Django project)
 
@@ -725,7 +765,7 @@ def process_scrape_task_alerts(scrape_task_uuid: str = None):
 @shared_task
 def update_childbot_statuses():
     logger.info("🚀 Starting Childbot login status update process.")
-
+     
     # Step 1: Connect to Redis
     redis_conn = get_redis_connection("default")
 
@@ -1302,3 +1342,126 @@ def process_task_event(event_data):
             print(f"[{timezone.now()}] Task with UUID: {uuid} not found, created and set to started.")
         else:
             print(f"[{timezone.now()}] Task with UUID: {uuid} not found, and event type is not 'task_started'. Ignoring.")
+
+
+        
+        
+
+from .models import TaskErrorSummary, Task, ScrapeTask, Server,Issue
+import traceback
+@shared_task()
+def fetch_and_update_task_errors():
+    logger.info("Starting fetch_and_update_task_errors task...")
+
+    reporting_server = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
+    if not reporting_server:
+        logger.error("No reporting server found with instance_type='reporting_and_analytics_server'. Task aborted.")
+        return
+
+    analytics_base = reporting_server.public_ip
+
+
+    logger.info(f"Using analytics base URL: {analytics_base}")
+
+    all_tasks = Task.objects.all().order_by("-created_at")
+    logger.info(f"Fetched {all_tasks.count()} tasks for processing.")
+
+    for task in all_tasks:
+        task_uuid = str(task.uuid)
+        profile_name = getattr(task, "profile", None)
+
+        if not profile_name:
+            logger.warning(f"Task {task_uuid} has no associated profile. Skipping.")
+            continue
+
+        summary_url = analytics_base + f"reporting/task-summaries/{task_uuid}/"
+        logger.debug(f"Fetching summary for Task UUID={task_uuid} (Profile={profile_name}) from {summary_url}")
+
+        try:
+            resp = requests.get(summary_url, timeout=10)
+            if resp.status_code != 200:
+                logger.error(f"Failed to fetch summary for Task {task_uuid}. Status code: {resp.status_code}")
+                continue
+
+            summary = resp.json()
+            if not summary:
+                logger.warning(f"No summary data returned for Task {task_uuid}.")
+                continue
+
+            # ---------- Condition 1: Incorrect Password ----------
+            critical_events = summary.get("critical_events_summary", [])
+            critical_errors_lower = [
+                (e.get("type") if isinstance(e, dict) else str(e)).lower()
+                for e in critical_events
+            ]
+            if any("incorrect_password" in err for err in critical_errors_lower):
+                logger.info(f"Incorrect password detected for bot '{profile_name}'. Checking if issue already exists...")
+                if not Issue.objects.filter(
+                    name="Incorrect Password",
+                    status__in=["open", "in_progress"],
+                    affected_tasks__profile=profile_name
+                ).exists():
+                    with transaction.atomic():
+                        affected_tasks = Task.objects.filter(profile=profile_name)
+                        affected_tasks.update(status="failed")
+
+                        issue = Issue.objects.create(
+                            name="Incorrect Password",
+                            description=f"Tasks failed due to incorrect password for bot '{profile_name}'.",
+                            status="open"
+                        )
+                        issue.affected_tasks.add(*affected_tasks)
+                        logger.info(f"Issue created: Incorrect Password for profile '{profile_name}'. {affected_tasks.count()} tasks updated.")
+                continue
+
+            # ---------- Condition 2: Login Attempt Failed > 10 ----------
+            login_attempt_failed = summary.get("login_attempt_failed", 0)
+            if login_attempt_failed and login_attempt_failed > 10:
+                logger.info(f"Excessive login attempts ({login_attempt_failed}) for bot '{profile_name}'.")
+                if not Issue.objects.filter(
+                    name="Login Attempts Failed",
+                    status__in=["open", "in_progress"],
+                    affected_tasks__profile=profile_name
+                ).exists():
+                    with transaction.atomic():
+                        affected_tasks = Task.objects.filter(profile=profile_name)
+                        affected_tasks.exclude(status="failed").update(status="failed")
+
+                        issue = Issue.objects.create(
+                            name="Login Attempts Failed",
+                            description=f"Tasks failed due to excessive login attempts for bot '{profile_name}'.",
+                            status="open"
+                        )
+                        issue.affected_tasks.add(*affected_tasks)
+                        logger.info(f"Issue created: Login Attempts Failed for '{profile_name}'. {affected_tasks.count()} tasks updated.")
+                continue
+
+            # ---------- Condition 3: Storage Upload Failed > 10 ----------
+            storage_upload_failed = summary.get("storage_upload_failed", 0)
+            if storage_upload_failed and storage_upload_failed > 10:
+                logger.info(f"Storage upload failures detected ({storage_upload_failed}).")
+                if not Issue.objects.filter(
+                    name="Storage House Down",
+                    status__in=["open", "in_progress"]
+                ).exists():
+                    with transaction.atomic():
+                        affected_tasks = Task.objects.all()
+                        affected_tasks.update(status="failed")
+
+                        issue = Issue.objects.create(
+                            name="Storage House Down",
+                            description="Storage upload failed more than 10 times; all tasks stopped.",
+                            status="open"
+                        )
+                        issue.affected_tasks.add(*affected_tasks)
+                        logger.info(f"Issue created: Storage House Down. {affected_tasks.count()} tasks updated.")
+                continue
+
+        except requests.RequestException as e:
+            logger.error(f"Network error fetching summary for Task {task_uuid}: {e}")
+            logger.debug(traceback.format_exc())
+        except Exception as e:
+            logger.error(f"Unexpected error processing Task {task_uuid}: {e}")
+            logger.debug(traceback.format_exc())
+
+    logger.info("fetch_and_update_task_errors task completed.")

@@ -279,6 +279,8 @@ def handle_audience_creation(a, payload):
     general_config = payload.get('generalConfig', {})
     settings = general_config.get('settings', {})
     workflow_steps = payload.get('steps', [])
+    prompt_text = payload.get("prompt", {}).get("prompt", "N/A")
+    api_key = general_config.get("settings", {}).get("api_key", "N/A")
 
     name = settings.get('name')
     service = settings.get('service')
@@ -321,7 +323,7 @@ def handle_audience_creation(a, payload):
 
     # Step 4: Create tasks from workflow steps
     uuids = []
-    for idx, step in enumerate(workflow_steps):
+    for idx, step in enumerate(workflow_steps): 
         step_type = step.get('type')
         step_data = step.get('data')
 
@@ -334,38 +336,65 @@ def handle_audience_creation(a, payload):
                 "service.equal": service,
                 "tasks__uuid.in": scraped_task_uuids,
             })
-            # Special handling for the first task's end_point and data_point
-            task_service = "datahouse" # The service will be datahouse for retrieve
+            task_service = "datahouse"
             task_end_point = "retrieve"
             task_data_point = "retrieve_from_datahouse"
         else:
-            # Subsequent tasks pull from the previous task only
             previous_task_uuid = uuids[-1]
-            filters = convert_frontend_cleaning_data_to_q_payload(step_data) if step_type == 'cleaning' else step_data.copy()
+            filters = convert_frontend_cleaning_data_to_q_payload(step_data) if step_type == 'cleaning' else {}
             filters.update({
                 "service.equal": service,
                 "tasks__uuid.in": [previous_task_uuid],
             })
-            # Existing logic for subsequent tasks' end_point and data_point
+
+            # Set service and endpoint
             task_service = "datahouse" if step_type == "cleaning" else "data_enricher"
             task_end_point = "retrieve" if step_type == "cleaning" else "enrich"
-            task_data_point = "retrieve_from_datahouse" if step_type == "cleaning" else "enrich_social_media_profile"
 
+            # Conditionally set data_point
+            if step_type == "enrichments" and step_data.get("enrichments_type") == "gender_nationality_enrichment":
+                task_data_point = "enrich"
+            else:
+                task_data_point = "retrieve_from_datahouse" if step_type == "cleaning" else "enrich_social_media_profile"
+        lock_results = True
 
+        # Modify lock_results conditionally
+        if task_data_point == "retrieve_from_datahouse":
+            lock_results = False
+        
+        # Default service
+        if step_type == "enrichments" and step_data.get("enrichments_type") == "user_info_enrichment":
+            task_service ="instagram"
+            task_end_point = "user"
+            task_data_point = "bulk_user_info_scraper"
+        
+        service_value = "openai" if step_type == "enrichments" else ""
+        from ..models import Server  
+        datahouse = Server.objects.all().filter(instance_type='data_server')
+        datahouse = datahouse[0].public_ip
+        storagehouse = Server.objects.all().filter(instance_type='storage_server')
+        storagehouse =storagehouse[0].public_ip
+        analytics = Server.objects.all().filter(instance_type='reporting_and_analytics_server')
+        analytics = analytics[0].public_ip
         task_data = {
             "service": task_service, # Use the determined service
             "ref_id": str(a.uuid),
             "end_point": task_end_point, # Use the determined end_point
             "data_point": task_data_point, # Use the determined data_point
             "add_data": {
+                
                 "data_source": [{
                     "type": "data_house",
                     "object_type": "profile",
                     "filters": filters,
                     "size": 30,
-                    "lock_results": True
+                    "lock_results": lock_results,
+                    "datahouse_url": datahouse + "datahouse/api/consume/",
+                    "reporting_house_url": analytics + "reporting/task-reports/",
+                    "storage_house_url" : storagehouse + "storagehouse/api/upload",
+                    "save_to_storage_house": True
                 }],
-                "service": "openai" if step_type == "enrichments" else "",
+                
                 "save_to_googlesheet": save_to_googlesheet,
                 "spreadsheet_url": google_sheet_url,
                 "worksheet_name": f"audience-{step_type}",
@@ -374,6 +403,46 @@ def handle_audience_creation(a, payload):
             "repeat_duration": "1m",
             "uuid": str(uuid.uuid1())
         }
+        # Add enrichment-specific fields if data_point is 'gender_nationality_enrichment'
+        if task_data_point == "enrich":
+            task_data["add_data"].update({
+                "prompt": (
+                    "For the name {name}, provide the following details:\n"
+                    "1. Type (e.g., Person, Brand,continent etc.)\n"
+                    "2. Gender (if it's a person's name)\n"
+                    "3. Country of origin or association\n\n"
+                    "and follow this strictly."
+                    "Try to provide the details based on their names and also don't focus on any special characters or icons in the name."
+                    "Try to provide the details regarding country and gender while focusing on the name and not focusing on icons in the name."
+                    "If you don't have any information, just keep the fields empty, please."
+                ),
+                "columns": ["name"],
+                "output_column_names": ["country", "gender", "type","continent"],
+                "api_key": api_key,
+                "service": service_value,
+                
+                
+            })
+            
+        elif task_data_point in ("enrich_social_media_profile", "bulk_user_info_scraper"):
+            task_data["add_data"].update({
+                "api_key": api_key,
+                "service": service_value,
+            })
+        
+        if task_data_point != "retrieve_from_datahouse":
+            task_data["add_data"].update({
+                "lock_type": "data_point"
+            })
+    
+        if task_data_point in [
+            "enrich",
+            "enrich_social_media_profile",
+            "bulk_user_info_scraper"
+            ]:
+            task_data["add_data"].update({
+                "datahouse_blocks": ["users"]
+            })
 
         _t = Task(**task_data)
         _t.server = reference_task.server
@@ -399,22 +468,23 @@ def convert_frontend_cleaning_data_to_q_payload(cleaning_data):
     into a payload for json_to_django_q.
     """
 
-    FRONTEND_OPERATOR_TO_BACKEND_LOOKUP = {
-        "eq": "",               # exact match
-        "gt": "gt",
-        "gte": "gte",
-        "lt": "lt",
-        "lte": "lte",
-        "contains": "icontains",
-        "starts with": "istartswith",
-        "ends with": "iendswith",
-        "neq": "exact",         # handled in 'exclude'
-        "does not contain": "icontains",  # handled in 'exclude'
-        "is_empty": "isnull",
-        "is_not_empty": "isnull",
-        "is_one_of": "in",
-        "range": "range"
+    FRONTEND_OPERATOR_TO_BACKEND_LOOKUP = { 
+    "eq": "exact",           # exact match
+    "gt": "gt",
+    "gte": "gte",
+    "lt": "lt",
+    "lte": "lte",
+    "contains": "icontains",
+    "starts with": "istartswith",
+    "ends with": "iendswith",
+    "neq": "exact",          # handled in 'exclude'
+    "does not contain": "icontains",  # handled in 'exclude'
+    "is_empty": "isnull",
+    "is_not_empty": "isnull",
+    "is_one_of": "in",
+    "range": "range"
     }
+
 
     q_payload = {
         "and_conditions": [],

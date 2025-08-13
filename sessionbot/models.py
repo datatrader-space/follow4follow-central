@@ -1908,3 +1908,50 @@ class ResourceUsage(models.Model):
     def __str__(self):
         return f"{self.server.name} - {self.timestamp}"
     
+
+class TaskErrorSummary(models.Model):
+    task_uuid = models.UUIDField(primary_key=True)
+    task_name = models.CharField(max_length=255)
+    bot_name = models.CharField(max_length=255, null=True, blank=True)  # new, e.g. profile or bot name
+    scrape_task_name = models.CharField(max_length=255, null=True, blank=True)  # new scrape task name
+    ref_id = models.UUIDField(null=True, blank=True)
+    critical_errors = models.JSONField(default=list)  # List of strings
+    attempt_failed_errors = models.JSONField(default=list)
+    current_status = models.CharField(max_length=50, default="unknown")  # e.g. running, paused, failed
+    issue_status = models.CharField(max_length=50, default="pendding")  # e.g. running, paused, failed
+    last_updated = models.DateTimeField(auto_now=True)
+    def __str__(self):
+        return f"{self.task_name} ({self.current_status}) - {self.task_uuid}"
+    
+    
+    
+class Issue(models.Model):
+    ISSUE_STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('in_progress', 'In Progress'),
+        ('resolved', 'Resolved'),
+        ('closed', 'Closed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    
+    affected_tasks = models.ManyToManyField('Task', blank=True, related_name='issues')
+    
+    resolution_data = models.JSONField(blank=True, default=dict, help_text="Data related to the resolution")
+    
+    resolution_date = models.DateTimeField(null=True, blank=True, help_text="Date and time when issue was resolved")
+    
+    status = models.CharField(
+        max_length=20,
+        choices=ISSUE_STATUS_CHOICES,
+        default='open',
+        help_text="Current status of the issue"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.get_status_display()})"
