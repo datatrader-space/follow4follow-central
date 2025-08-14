@@ -3,7 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import IntegrityError
 
 from sessionbot.resource_utils import create_resources_from_google_sheets,analyze_bot_responses
-from .models import TaskErrorSummary,BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Log,Audience
+from .models import Issue,BulkCampaign, ChildBot, Device, Server, Proxy, Task,ScrapeTask,Log,Audience
 import json
 import requests
 import logging
@@ -1762,12 +1762,12 @@ def fetch_task_summaries_view(request):
     
     
 from django.db import transaction
-
+from django.utils import timezone
 @csrf_exempt
 def update_task_status(request):
     """
-    Updates the status of a single bot task based on its UUID.
-    This view now exclusively uses 'task_uuid' for identification.
+    Updates issue status (by issue_ids) and optionally related task status if resolved.
+    Each task is paired with the same issue if only one issue is provided.
     """
     if request.method != "POST":
         return HttpResponseBadRequest("Only POST method is allowed.")
@@ -1777,72 +1777,77 @@ def update_task_status(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON payload."}, status=400)
 
-    task_uuid = data.get("task_uuid")
+    task_ids = data.get("task_ids", [])
+    issue_ids = data.get("issue_ids", [])
     status = data.get("status")
-    print(status)
-    print(f"here is the Task uuid: {task_uuid}")
 
-    if not task_uuid or not status:
-        return JsonResponse(
-            {"error": "Request must include both 'task_uuid' and 'status'."},
-            status=400
-        )
-    
-    if status.lower() not in ['pending', 'resolved']:
-        return JsonResponse(
-            {"error": "Status must be either 'pending' or 'resolved'."},
-            status=400
-        )
+    # Validation
+    if not issue_ids or not isinstance(issue_ids, list):
+        return JsonResponse({"error": "'issue_ids' must be a non-empty list."}, status=400)
+    if not task_ids or not isinstance(task_ids, list):
+        return JsonResponse({"error": "'task_ids' must be a non-empty list."}, status=400)
+    if not status:
+        return JsonResponse({"error": "Status is required."}, status=400)
 
-    tasks_updated = 0
-    errors_updated = 0
+    valid_statuses = ['open', 'in_progress', 'resolved', 'closed']
+    if status.lower() not in valid_statuses:
+        return JsonResponse({"error": f"Status must be one of {valid_statuses}."}, status=400)
+
+    updated_issues = 0
+    updated_tasks = 0
+    reported_to_server = 0
 
     try:
         with transaction.atomic():
+            # Update issues
+            issues_qs = Issue.objects.filter(id__in=issue_ids)
             if status.lower() == "resolved":
-                tasks_updated = Task.objects.filter(uuid=task_uuid).update(status="pending")
+                updated_issues = issues_qs.update(status=status.lower(), resolution_date=timezone.now())
             else:
-                tasks_updated = Task.objects.filter(uuid=task_uuid).update(status="failed")
-            errors_updated = TaskErrorSummary.objects.filter(task_uuid=task_uuid).update(issue_status=status)
+                updated_issues = issues_qs.update(status=status.lower())
 
-            if tasks_updated == 0:
-                return JsonResponse(
-                    {"error": f"No task found with UUID: {task_uuid}"},
-                    status=404
-                )
+            # Update tasks and notify reporting server
+            issue_obj = Issue.objects.filter(id=issue_ids[0]).first()  # take first issue
+            if not issue_obj:
+                return JsonResponse({"error": "Issue not found."}, status=404)
+
+            for task_id in task_ids:
+                task_obj = Task.objects.filter(id=task_id).first()
+                if task_obj:
+
+                    # --- NEW LOGIC: Skip tasks with unresolved issues ---
+                    unresolved_issues = task_obj.issues.exclude(status='resolved')
+                    if unresolved_issues.exists():
+                        continue
+                    # --- END NEW LOGIC ---
+
+                    task_uuid = str(task_obj.uuid)
+                    updated_tasks += Task.objects.filter(id=task_id).update(status="pending")
+
+                    # Notify reporting server
+                    reporting_server = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
+                    if reporting_server:
+                        analytics_base = reporting_server.public_ip
+                        summary_url = analytics_base + "/reporting/task-summaries/update/"
+                        payload = {
+                            "task_uuid": task_uuid,
+                            "status": status.lower(),
+                            "issue": issue_obj.name  # include issue name
+                        }
+                        headers = {"Content-Type": "application/json"}
+                        try:
+                            response = requests.post(summary_url, headers=headers, data=json.dumps(payload), timeout=10)
+                            response.raise_for_status()
+                            reported_to_server += 1
+                        except requests.exceptions.RequestException as e:
+                            print(f"Failed to notify reporting server for task {task_uuid}: {e}")
+
     except Exception as e:
         return JsonResponse({"error": f"A server error occurred: {str(e)}"}, status=500)
 
-    print(tasks_updated)
-    # --- Send POST request to reporting server here ---
-
-    # Get reporting server IP
-    reporting_server = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
-    if reporting_server:
-        analytics_base = reporting_server.public_ip
- 
-        summary_url = analytics_base + "reporting/task-summaries/update/"
-
-        payload = {
-            "task_uuid": str(task_uuid),
-            "status": status.lower()
-        }
-        headers = {"Content-Type": "application/json"}
-
-        try:
-            response = requests.post(summary_url, headers=headers, data=json.dumps(payload), timeout=10)
-            response.raise_for_status()
-            print(f"Reported status update to external server: {response.json()}")
-        except requests.exceptions.RequestException as e:
-            # You may want to log this error properly instead of print
-            print(f"Failed to notify reporting server: {e}")
-
-    else:
-        print("Reporting server not configured or found.")
-
     return JsonResponse({
-        "message": "Status updated successfully.",
-        "task_uuid": task_uuid,
-        "tasks_updated_count": tasks_updated,
-        "error_summaries_updated_count": errors_updated,
+        "message": "Status update completed.",
+        "issues_updated": updated_issues,
+        "tasks_updated": updated_tasks,
+        "reports_sent": reported_to_server
     })

@@ -1347,7 +1347,7 @@ def process_task_event(event_data):
         
         
 
-from .models import TaskErrorSummary, Task, ScrapeTask, Server,Issue
+from .models import  Task, ScrapeTask, Server,Issue
 import traceback
 @shared_task()
 def fetch_and_update_task_errors():
@@ -1412,10 +1412,9 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Incorrect Password for profile '{profile_name}'. {affected_tasks.count()} tasks updated.")
-                continue
 
             # ---------- Condition 2: Login Attempt Failed > 10 ----------
-            login_attempt_failed = summary.get("login_attempt_failed", 0)
+            login_attempt_failed = summary.get("total_attempt_failed", 0)
             if login_attempt_failed and login_attempt_failed > 10:
                 logger.info(f"Excessive login attempts ({login_attempt_failed}) for bot '{profile_name}'.")
                 if not Issue.objects.filter(
@@ -1434,11 +1433,10 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Login Attempts Failed for '{profile_name}'. {affected_tasks.count()} tasks updated.")
-                continue
 
-            # ---------- Condition 3: Storage Upload Failed > 10 ----------
+            # ---------- Condition 3: Storage Upload Failed ----------
             storage_upload_failed = summary.get("storage_upload_failed", 0)
-            if storage_upload_failed and storage_upload_failed > 10:
+            if storage_upload_failed:
                 logger.info(f"Storage upload failures detected ({storage_upload_failed}).")
                 if not Issue.objects.filter(
                     name="Storage House Down",
@@ -1450,12 +1448,11 @@ def fetch_and_update_task_errors():
 
                         issue = Issue.objects.create(
                             name="Storage House Down",
-                            description="Storage upload failed more than 10 times; all tasks stopped.",
+                            description="Storage upload failed; all tasks stopped.",
                             status="open"
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Storage House Down. {affected_tasks.count()} tasks updated.")
-                continue
 
         except requests.RequestException as e:
             logger.error(f"Network error fetching summary for Task {task_uuid}: {e}")
@@ -1463,5 +1460,5 @@ def fetch_and_update_task_errors():
         except Exception as e:
             logger.error(f"Unexpected error processing Task {task_uuid}: {e}")
             logger.debug(traceback.format_exc())
-
+        
     logger.info("fetch_and_update_task_errors task completed.")

@@ -47,3 +47,4 @@ googleapis-common-protos==1.54.0
 django-cors-headers
 eventlet
 django-jsonform
+slackclient == 2.9.4 
