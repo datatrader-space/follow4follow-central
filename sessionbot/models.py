@@ -1420,7 +1420,7 @@ class BulkCampaign(BaseModel):
     childbots=models.ManyToManyField(ChildBot,related_name='campaign')
     devices=models.ManyToManyField(Device,blank=True)
     audience=models.ForeignKey(Audience,blank=True,null=True,on_delete=models.SET_NULL)
-    filters=models.JSONField(blank=True,null=True,default={})
+    filters=models.JSONField(blank=True,null=True,default=dict)
     scrape_tasks=models.ManyToManyField(ScrapeTask,blank=True,related_name='campaign')
     proxies=models.ManyToManyField(Proxy,related_name='proxies',null=True,blank=True)
     #localstore=models.BooleanField(default=False)
