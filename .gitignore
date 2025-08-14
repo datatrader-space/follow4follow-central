@@ -6,3 +6,6 @@ venv
 data
 media
 .env
+sessionbot/migrations/
+creator/migrations/
+customer/migrations/
