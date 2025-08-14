@@ -9,3 +9,8 @@ media
 sessionbot/migrations/
 creator/migrations/
 customer/migrations/
+# Django migrations
+*/migrations/
+# Python cache
+__pycache__/
+*.pyc
