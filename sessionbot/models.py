@@ -783,7 +783,7 @@ class ScrapeTask(BaseModel):
     failed_request_count = models.IntegerField(default=0)
     successful_request_count = models.IntegerField(default=0)
     scraped_so_far=models.IntegerField(default=0)
-    bot_status=models.JSONField(blank=True,null=True,default={})
+    bot_status=models.JSONField(blank=True,null=True,default=dict)
     def __str__(self):
         return self.name
     
@@ -1340,11 +1340,11 @@ class Audience(BaseModel):
     service=models.CharField(choices=SERVICES,blank=False,null=False,default='instagram',max_length=500)
     name=models.CharField(blank=False,null=False,unique=True,max_length=500)
     scrape_tasks=models.ManyToManyField(ScrapeTask,blank=False,null=False)
-    # cleaning_configuration=models.JSONField(default={},blank=False,null=False)
-    # enrichment_configuration=models.JSONField(default={},blank=False,null=False)
-    workflow_steps = models.JSONField(default={},blank=False,null=False)
+    # cleaning_configuration=models.JSONField(default=dict,blank=False,null=False)
+    # enrichment_configuration=models.JSONField(default=dict,blank=False,null=False)
+    workflow_steps = models.JSONField(default=list,blank=False,null=False)
     prompt = models.TextField(blank=True,null=True)
-    storage_configuration=models.JSONField(default={},blank=False,null=False)
+    storage_configuration=models.JSONField(default=dict,blank=False,null=False)
     uuid=models.UUIDField(unique=True,default=uuid.uuid1())
     
     def __str__(self):
