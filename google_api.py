@@ -5,24 +5,16 @@ import googleapiclient.discovery
 from google.oauth2 import service_account
 import io
 import os
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class GoogleAPI(object):
     def __init__(self):
         self.service_name='drive'
         self.media_folder=os.path.join(os.getcwd(),'data','media','media')
-        self.credentials_dict={
-  "type": "service_account",
-  "project_id": "aadml-451013",
-  "private_key_id": "8a3a8d2abc5b298f9fee028ac3d4126fd4e89e95",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQChISQaxxf9PYfX\ngdfUv0rTEd+eWc5+G6D22geB65a5rLLjnLuKDdcQJ3Us3XUU0CphQeWAg3XUjvHk\nxOC4hvGjQtrfirS2sYwZtS/GChUnyYSjxFOzx0msOYyVoRls4GyxGCAP4vFe6O+N\nueXFUHtGJRpD7uHXFfTNZuhdSat0odG7hSZ4EE5M5Dby6wok+yBe1A40mKvn/YFx\nYMpzMsxwSoMTr07r+Y3QTepVFZUjdqU/cg1j6Op0l9jv3Tk6269V4cWPDoEefhvl\n9Z3YxNGhpFGdLmcbxL8o9quD70E0QHhQL2wDpuzfZABdqLDOEbIbc9aKoEs9G04D\nI8W0uB6jAgMBAAECggEAC3kyKCv51hxt5Hv2E/BSSQRScYmAjeGP6JiKTivzCUaj\nyqDwrN61R3qNg19DlxdQbmANf+nTV8EvbU+/39h0oM4dQZlGhkCqsrvuM5SopSC1\nt9UHhskGi+OYUlgjj7KoyGfETdZvVaxI9WmmQYBjY1qla6Wm4etuiXIJZQlw0q2o\nqSUGiImsyOCVOs7jce9UAygb0xKrmd/MApwtv9h5HtsCXq4T29v2xjHY9hZCmJ8x\nF+k3Tmerq54B2FWGw+WrDDi2bLFhTCE9P2VUrKvn7Lk7VEub5SUeMua6MUa7qxzO\nRIQXlgnKXCWNzGIuYwxYiC/o5qUDaWVPtq8NE196sQKBgQDewBm9wgDSHsA6j5yy\npiryE9GrPPiRGNuxu43LwGQyM2GuOM9wbJxyIHrsDbkTd+d0/sm69ljncsq2XX1R\n9AC7ZnDho8uiirwIuWOTRafNIWYCqYUgeXDK2iWZEkWgoSxihmqlOY0pfnDA3FWz\nL3G1iX3ljUMQsUYZrfH7CBE+EQKBgQC5LlYtYiEDkMQL0A/tdTO7+ZIdM8Lc73Hc\nzoLtLJIKsHqoVewttxDCRrPudrz5mlB7g+ZPipRYY3oaQgD4m6sjyu9MHDRqQGBx\neHQd3F/8QeStIvenHkgQEI68h3v5JXmI6Y3x4XIAxoP+DUxFgWqRFkSsMAueCwDs\neEbnyMxtcwKBgQCMc14Hu0rfMkqM4j6wmnvbtclvintEqgLkl1j6Dy5eRO2jd+i8\nf49JmtdG/gQjlWgY6gpy26AFF+lfgaViRlMr1pT4gVoF/CpB6fsyQipi+lsi9Jaf\nelM3ZMNuOAo1FUsyOIUH9zjd3/7ibEuRNyogiDgcxKxz2wNTb81zNowAsQKBgG7W\nNypuw4fYzB6t5/qe3doy5Kup4YZPov0gdejzdm4Dd0buNrCeE9/UZbnjQ/S50lY7\nekw9i9DjqZ+xxdcHhYWk31nUv+KgqZkBGa8Nyj24SuD+PvC+BS/oWSaqiR90uKuj\n7xvJbmzcZQBYgUBQ17IDfBL7pthviZv/2aC95O3VAoGAT9B9W2gvjPaGwke8Oav6\nsVAMxt8a0zFKGIafOKKyRPdcN4AJY5q1B6a6hIq7qcEaAH/uZX6bGAceRmrvXRlm\nzxcC5ycl7NDR1bJ/XQob4+DcBksLxBKcLl2+A5wgmgyzwSRPJtJiSXwlqqLSfaim\n1b6HCWKos3TBBkpGewhaoOU=\n-----END PRIVATE KEY-----\n",
-  "client_email": "developementlevelbot@aadml-451013.iam.gserviceaccount.com",
-  "client_id": "106288661307645661005",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/developementlevelbot%40aadml-451013.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
+        self.credentials_dict=json.loads(os.getenv("GOOGLE_CREDENTIALS"))
         self.version='v3'
         if not os.path.isdir(self.media_folder):
             os.makedirs(self.media_folder)
@@ -175,17 +167,7 @@ class GoogleSheet(GoogleAPI):
          
        
     def initialize_connection(self):
-        credentials={ "type": "service_account",
-  "project_id": "aadml-451013",
-  "private_key_id": "f3d6bc84e5a8c7a9418c9853676c15353be0a5b9",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDJDc9emsaXnEWY\n3iPqB9IyFI9EQTzl4bHgH2ut3zemsCe2PVAfxT4TW7oN1lLEKbwUb/7oumN0zXPX\nioYB2MSeqxcBH3VHGqcahsdcLrhUbGppHlPavg6wzlwUUH7CVsvB9Gd4ErHcqApT\nBXjshW5VYAR2VEzW4atDqaSOtFMFR7OenBY7QfVDzgZK5Ko4/5AuLO/ZR2jNkJA/\n/uI09yGBoAL4zUN26VqbcsTzEMzgWrlt1f4hoowKHP8RtZZBj5gh76PkDU9tIPTg\n0SGlnxuYw+kgF9iX/PD889xq6pcHwqRNVXtUIcnkhfDVZP6PvhV57OSCn5SqY51b\nvFoKKsgpAgMBAAECggEAFD0u5xXbEHeDfQo9oMk1RGPT8TnE/NotqwNWtlvOURoS\nAVMmPfB/2XiGH+73iXYvD/qfNUPQD7m/4852w3hUAKn16J/HUUdSU4YGSxYL6bm5\nM4hBRjeUKIG5fLUGsZ8Fp2poQQrWu0DyOx3FqL+c1fzSriu5yXbRo//PiCsIYXNC\ns85yTWJpIszigbS1agXZxwvbqAdrgYZi7PV5trad63nhXG7+jKlXsP03rFnB++D8\nHCpddNwmwpvTDsogwhgNiaJT/7Nltnz3tSlcuVgQtDzwq5c1V3cKr95p8hTdGiHc\nuZyRzpo4kgffCCC32UM94CBgP3SBsVa0GKJKMjTc5QKBgQD5oWcKtzhF4w8NWADQ\nLP3SpxL5p4/ioarITTr7yM9igNN/6/EMzjpyJ6zFOQRAUCeRTcj0Gy5lv4lRwJkY\nQMTuCPrwtMxoH+Du9jotnx7kf9AaWwqkPqUS0uoiGixKAjjikOOt3KfLjoeu/Vnf\n/4h/sbkRAfdro3Ehy3DkHTtbNQKBgQDOLxp6uZu2ry2IXXKCmkp8fIgg0yh9tGKi\njpE8FbTXl3GmG3JJ8EB1P+Lh2s1kZ85YITJVtqYk2HDw4UVU5CvakPF0Y4lLuyfS\nOW/QZ6yiYP8Gjx5gvmmzvEbe6uFkWkwXzfQAx0QqY10LGeTXEU6PUQt8C3fuSKf7\nPrazxQXjpQKBgES6x6APqhKz3WUTIcYvXQMutO6/z8HaOSdE/ERumYrJZXIHCCs6\nbKUZf1wdwqniZ8J95CIxiajB/5DeskgXLSFMn6q+XLkebdPdP09oTB0lg6p9/oQS\nK2jvYT9abW9DBV57/fPUmO5Wo8zuPFyMAo0F5aplHDYqne9sD/z+f2UxAoGAM3qp\nRtkO2tb0LGcAj0FMtbY2GtP9+RzPv7yO4Iye4XFLi+iwaWuV/HBeCnwh6h7M804e\nji4TX4G2+T2VnPN3S5QC5Udw4TqyX5e9pjAsd0J2ikGzmP4R0DGDFGdarT6qXwsq\nEAOwrlCuy3XEoDoO/lOC5Y7Le/AiGOX4ofvgU40CgYAI5009iHRyFhi2D6VYpd16\ndizzqne/Q51N4b8jhCUHvJEYWuhxSwbYoEBH/hnCbpWikx5n1cfsnoAJhoNn18w/\n1HX2IvNCOizGYvHfrrcRwIwgE8yt3zMflbS1QWvegMqixbaC6TjTJK4CHPpAKd7U\nBuIQLjHI2SaXGygojJyPDw==\n-----END PRIVATE KEY-----\n",
-  "client_email": "developementlevelbot@aadml-451013.iam.gserviceaccount.com",
-  "client_id": "106288661307645661005",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/developementlevelbot%40aadml-451013.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"}
+        credentials=json.loads(os.getenv("GOOGLE_CREDENTIALS"))
         try:     
             self.connection= gspread.service_account_from_dict(credentials)
         except Exception as e:
