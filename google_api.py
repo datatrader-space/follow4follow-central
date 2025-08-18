@@ -14,7 +14,7 @@ class GoogleAPI(object):
     def __init__(self):
         self.service_name='drive'
         self.media_folder=os.path.join(os.getcwd(),'data','media','media')
-        self.credentials_dict=json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+        self.credentials_dict= json.loads(os.getenv("GOOGLE_CREDENTIALS"))
         self.version='v3'
         if not os.path.isdir(self.media_folder):
             os.makedirs(self.media_folder)
