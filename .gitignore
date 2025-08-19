@@ -27,7 +27,7 @@ db.sqlite3
 media/
 staticfiles/
 static/
-# local_settings.py
+local_settings.py
 *.cover
 coverage/
 htmlcov/
@@ -36,8 +36,8 @@ htmlcov/
 *.egg
 *.manifest
 *.spec
-# # Ignore Django settings
-# */settings.py
+# Ignore Django settings
+*/settings.py
 
 # Django migrations
 */migrations/
