@@ -20,12 +20,15 @@ def createResource(request: HttpRequest) -> JsonResponse:
             print("Payload received:", payload)
             
             r = create_resources_from_google_sheets(**payload)
+            print(r)
             operation_counts = analyze_bot_responses(r)
+            print(operation_counts)
             # Print the results
             results = []
             for status, count in operation_counts.items():
                 results.append((f"{status.replace('_', ' ').title()}: {count}"))
             
+            print(f"Results: {results}") 
             # print("Response from create_resources_from_google_sheets:", r)
             
             response = {'status': 'success', 'data': results}

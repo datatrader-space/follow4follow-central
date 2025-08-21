@@ -13,6 +13,7 @@ import requests
 import json
 from django.conf import settings
 from .models import DataHouseSyncStatus,ChildBot,Server
+from services.slack.run_bot import Slack
 @shared_task()
 def sync_with_data_house_and_workers():
     """
@@ -290,6 +291,137 @@ def send_comand_to_instance(instance_id, data, model_config=None):
         task_model.save()
 
     return result
+
+
+@shared_task
+def update_childbot_statuses():
+    import requests
+    from sessionbot.utils import DataHouseClient
+    from sessionbot.models import Task, Server
+    logger.info("🚀 Starting Childbot status update process.")
+    
+    redis_conn = get_redis_connection("default")
+
+    reporting_house = Server.objects.filter(instance_type='reporting_and_analytics_server').first()
+    data_server = Server.objects.filter(instance_type='data_server').first()
+    if not reporting_house or not reporting_house.public_ip:
+        logger.error("❌ Reporting House server not configured properly. Aborting update.")
+        return False
+    if not data_server:
+        logger.error("❌ Data server not found. Aborting update.")
+        return False
+
+    base_url = reporting_house.public_ip.rstrip('/') + "/reporting/task-summaries/"
+    d = DataHouseClient()
+    d.base_url = data_server.public_ip
+
+    profiles = Task.objects.exclude(profile__isnull=True).exclude(profile__exact='')\
+                .values_list('profile', flat=True).distinct()
+    if not profiles:
+        logger.warning("⚠️ No profiles found in tasks. Nothing to update.")
+        return
+
+    updated_count = 0
+
+    for profile in profiles:
+        latest_task = Task.objects.filter(profile=profile).order_by('-created_at').first()
+        if not latest_task:
+            continue
+
+        task_uuid = str(latest_task.uuid)
+        redis_key = f"last_notified_bot_status:{task_uuid}"
+
+        last_notified_bytes = redis_conn.get(redis_key)
+        last_notified_dt = None
+        if last_notified_bytes:
+            try:
+                last_notified_dt = datetime.datetime.fromisoformat(
+                    last_notified_bytes.decode('utf-8').replace('Z', '+00:00')
+                )
+            except ValueError:
+                logger.warning(f"⚠️ Invalid Redis timestamp for {task_uuid}, will treat as new.")
+
+        try:
+            response = requests.get(f"{base_url}{task_uuid}/", timeout=10)
+            response.raise_for_status()
+            summary = response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Failed to fetch report for task {task_uuid}: {e}")
+            continue
+
+        latest_dt_str = summary.get("latest_report_end_datetime")
+        if not latest_dt_str:
+            continue
+
+        try:
+            latest_dt = datetime.datetime.fromisoformat(latest_dt_str.replace('Z', '+00:00'))
+        except ValueError:
+            continue
+
+        if last_notified_dt is not None and latest_dt <= last_notified_dt:
+            continue
+
+        try:
+            bot = ChildBot.objects.get(username=profile)
+        except ChildBot.DoesNotExist:
+            continue
+
+        # --- Existing status updates ---
+        login_status = summary.get("latest_login_status", "Unknown")
+        bot.logged_in = login_status.lower() == "success"
+
+        last_run_str = summary.get("last_report_datetime")
+        if last_run_str:
+            try:
+                bot.last_run_at = datetime.datetime.fromisoformat(last_run_str.replace('Z', '+00:00'))
+            except ValueError:
+                pass
+
+        scraped_so_far = summary.get("total_users_scraped")
+        if scraped_so_far is not None:
+            bot.scraped_so_far = scraped_so_far
+
+        data_point = summary.get("data_point")
+        if data_point and data_point.lower() != "login":
+            bot.is_scraper = True
+
+        # --- NEW: Count API requests for this bot ---
+        bot_task_uuids = list(Task.objects.filter(profile=profile).values_list("uuid", flat=True))
+
+        if bot_task_uuids:
+            successful_payload = {
+                "object_type": "requestlog",
+                "filters": {"task__uuid.in": bot_task_uuids, "status_code.in": [200]},
+                "count": True
+            }
+            failed_payload = {
+                "object_type": "requestlog",
+                "filters": {"task__uuid.in": bot_task_uuids, "status_code.in": [400, 401, 500]},
+                "count": True
+            }
+
+            successful_api_requests = d.retrieve(**successful_payload)
+            failed_api_requests = d.retrieve(**failed_payload)
+
+            if isinstance(successful_api_requests, dict):
+                bot.successful_api_requests = successful_api_requests.get("count", 0)
+            if isinstance(failed_api_requests, dict):
+                bot.failed_api_requests = failed_api_requests.get("count", 0)
+
+        bot.save(update_fields=[
+            "logged_in", "last_run_at", "scraped_so_far", "is_scraper",
+            "successful_api_requests", "failed_api_requests"
+        ])
+        updated_count += 1
+
+        redis_conn.set(redis_key, latest_dt_str)
+        logger.info(f"✅ Updated Childbot '{bot.username}' (task {task_uuid})")
+
+    logger.info(f"✅ Childbot status update complete. {updated_count} bots updated.")
+
+
+
+
 @shared_task()
 def analyze_and_create_update_metrics_for_scrapetask():
     import requests
@@ -507,354 +639,150 @@ logger = logging.getLogger(__name__)
 # --- End Configuration Notes ---
 
 
+
+
 @shared_task
 def process_scrape_task_alerts(scrape_task_uuid: str = None):
-    """
-    Celery task to:
-    1. Fetch ScrapeTasks (either a specific one or all).
-    2. Find related generic operational Tasks.
-    3. Retrieve aggregated summaries from the Reporting House for these tasks.
-    4. Consolidate all relevant data for the ScrapeTask.
-    5. Check if there is new task summary data for any sub-task within the ScrapeTask
-       since the last notification was sent (using Redis for state).
-    6. If new data is found, format and send a comprehensive performance alert to Slack,
-       and then update the 'last notified' timestamps in Redis.
-
-    Args:
-        scrape_task_uuid (str, optional): The UUID of a specific ScrapeTask
-                                          to process. If None, processes all ScrapeTasks.
-    """
     logger.info(f"Starting scrape task alerts processing for UUID: {scrape_task_uuid or 'all'}.")
 
-    # Establish Redis connection
     redis_conn = get_redis_connection("default")
 
-    # Fetch Reporting House URL from the Server model
-    reporting_house = Server.objects.filter(instance_type='reporting_and_analytics_server').first()
-    if not reporting_house or not reporting_house.public_ip:
-        logger.error("Reporting and Analytics Server URL not found. Aborting task.")
-        return False # Return False to indicate failure
-
-    reportinghouse_url = reporting_house.public_ip
-
     query_set = ScrapeTask.objects.all()
-
     if scrape_task_uuid:
         try:
-            # Validate UUID format
             uuid.UUID(scrape_task_uuid)
             query_set = query_set.filter(uuid=scrape_task_uuid)
         except ValueError:
-            logger.error(f"Invalid UUID format provided: {scrape_task_uuid}. Aborting task.")
+            logger.error(f"Invalid UUID format: {scrape_task_uuid}")
             return
 
     if not query_set.exists():
         logger.warning(f"No ScrapeTask found for UUID: {scrape_task_uuid or 'all'}. Exiting.")
         return
 
+    reporting_server = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
+    if not reporting_server:
+        print("❌ Reporting server not found.")
+        return
+    analytics_base_url = reporting_server.public_ip
+
     for scrape_task in query_set:
         logger.info(f"Processing ScrapeTask: {scrape_task.name} ({scrape_task.uuid})")
 
-        # Step 1 & 2: Get associated Central Tasks and their details
         central_tasks = Task.objects.filter(ref_id=scrape_task.uuid)
         if not central_tasks.exists():
-            logger.warning(f"No individual tasks found for ScrapeTask: {scrape_task.name}. Skipping alert.")
+            logger.warning(f"No tasks found for ScrapeTask: {scrape_task.name}. Skipping alert.")
             continue
 
-        task_uuids_to_fetch = [str(t.uuid) for t in central_tasks]
-        central_tasks_by_uuid = {str(t.uuid): t for t in central_tasks}
+        should_send_notification = False
+        newly_processed_task_timestamps = {}
 
-        # Step 3: Retrieve Reporting Summaries from Reporting App and check for new data
-        all_reports_data = {}
-        should_send_notification = False # Flag to decide if overall Slack alert should be sent
-        newly_processed_task_timestamps = {} # To store timestamps for Redis update after sending
-        from datetime import timezone
-        for task_uuid in task_uuids_to_fetch:
-            report_url = f"{reportinghouse_url}reporting/task-summaries/{task_uuid}/"
-            current_report_end_dt_str = None
-            current_report_end_dt = datetime.datetime.min.replace(tzinfo=timezone.utc) # Default for comparison
+        aggregated_by_data_input = defaultdict(lambda: {
+            'total_users_scraped': 0,
+            'total_downloaded_files': 0,
+            'total_storage_uploads': 0,
+            'failed_to_download_file_count': 0,
+            'critical_events': 0,
+            "total_runs_completed": 0,
+        })
+        individual_bot_metrics = defaultdict(dict)
+        critical_issues = []
+        overall_scrape_task_status = "Completed"
 
+        for task in central_tasks:
+            report_url = f"{analytics_base_url}reporting/task-summaries/{task.uuid}/"
             try:
                 response = requests.get(report_url, timeout=10)
                 response.raise_for_status()
-                report_data = response.json()
-                all_reports_data[task_uuid] = report_data
-                current_report_end_dt_str = report_data.get('latest_report_end_datetime')
-                
-                if current_report_end_dt_str:
-                    current_report_end_dt = datetime.datetime.fromisoformat(current_report_end_dt_str.replace('Z', '+00:00'))
-
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching report for task {task_uuid} from Reporting App: {e}")
-                # If fetching fails, we might still want to trigger an alert as it's a problem
-                # For this logic, if we can't get current data, assume it's "new" or problematic
-                #should_send_notification = False
-                
-                #newly_processed_task_timestamps[task_uuid] = datetime.datetime.now(timezone.utc).isoformat() # Use current time as a fallback
-                continue # Skip to next task if this one failed to fetch
-
-            # Get last notified timestamp from Redis
-            redis_key = f"last_notified_task_summary:{task_uuid}"
-            last_notified_dt_bytes = redis_conn.get(redis_key) # Redis returns bytes
-            print(last_notified_dt_bytes)
-            last_notified_dt = None
-            if last_notified_dt_bytes:
-                try:
-                    last_notified_dt = datetime.datetime.fromisoformat(last_notified_dt_bytes.decode('utf-8').replace('Z', '+00:00'))
-                except ValueError:
-                    logger.warning(f"Invalid last notified datetime '{last_notified_dt_bytes.decode('utf-8')}' in Redis for task {task_uuid[:8]}.... Treating as new data.")
-                    should_send_notification = True # If Redis value is corrupt, treat as new data and overwrite
-
-            # Determine if a notification is needed for this specific task summary
-            if last_notified_dt is None or current_report_end_dt > last_notified_dt:
-                should_send_notification = True
-                logger.debug(f"Task {task_uuid[:8]}... has new report data. Current: {current_report_end_dt}, Last Notified: {last_notified_dt}")
-            else:
-                logger.debug(f"Task {task_uuid[:8]}... has no new report data. Current: {current_report_end_dt}, Last Notified: {last_notified_dt}")
-
-            # Always store the current report's end time for potential future Redis update
-            # This ensures we store the latest timestamp whether a notification is sent or not
-            # (only updated to Redis if the *overall* notification is sent)
-            newly_processed_task_timestamps[task_uuid] = current_report_end_dt_str
-
-
-        if not all_reports_data:
-            logger.warning(f"No successful reports fetched for ScrapeTask: {scrape_task.name}. Skipping alert.")
-            continue
-
-        # Step 4: Aggregate Data
-        aggregated_by_data_input = defaultdict(lambda: {
-            'total_posts_scraped': 0,
-            'total_users_scraped': 0,
-            'total_rows': 0,
-            'total_runs_completed': 0,
-            'total_saved_file_count': 0,
-            'total_failed_download_count': 0,
-        })
-        individual_bot_metrics = defaultdict(lambda: {
-            'status': 'N/A',
-            'latest_report_end_datetime': datetime.datetime.fromtimestamp(0, tz=timezone.utc),
-            'total_posts_scraped': 0,
-            'total_users_scraped': 0,
-            'total_rows': 0,
-            'total_runs_completed': 0,
-            'total_saved_file_count': 0,
-            'total_failed_download_count': 0,
-            'associated_task_uuids': []
-        })
-        
-        # NOTE: Your original code attempts to save individual_bot_metrics to scrape_task.bot_status here.
-        # Ensure scrape_task.bot_status is a JSONField or similar in your model
-        # and that the structure of individual_bot_metrics is compatible.
-        # For simplicity in this update, I'm assuming it's a direct assignment,
-        # but you might need serialization if it's a TextField etc.
-        # scrape_task.bot_status = individual_bot_metrics 
-        # scrape_task.save()
-
-        overall_scrape_task_status = "Completed"
-        critical_issues = []
-
-        for task_uuid, report_summary in all_reports_data.items():
-            central_task = central_tasks_by_uuid.get(task_uuid)
-            if not central_task:
+                summary = response.json()
+            except Exception as e:
+                logger.error(f"Failed to fetch summary from {report_url}: {e}")
                 continue
 
-            # --- Aggregate by (data_point, input) ---
-            key = (central_task.data_point, central_task.input)
+            # Redis logic for last notified
+            redis_key = f"last_notified_task_summary:{task.uuid}"
+            last_notified_bytes = redis_conn.get(redis_key)
+            last_notified_dt = None
+            if last_notified_bytes:
+                try:
+                    last_notified_dt = datetime.datetime.fromisoformat(
+                        last_notified_bytes.decode("utf-8").replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    should_send_notification = True
 
-            # Handling aggregated_scraped_data
-            if isinstance(report_summary.get('aggregated_scraped_data'), dict):
-                for metric, value in report_summary['aggregated_scraped_data'].items():
-                    if isinstance(value, (int, float)):
-                        aggregated_by_data_input[key][metric] += value
+            last_report_datetime = summary.get("last_report_datetime")
+            if last_report_datetime:
+                last_report_dt = datetime.datetime.fromisoformat(last_report_datetime.replace("Z", "+00:00"))
+                if last_notified_dt is None or last_report_dt > last_notified_dt:
+                    should_send_notification = True
+                    newly_processed_task_timestamps[task.uuid] = last_report_dt.isoformat()
 
-            # Handling aggregated_data_enrichment
-            if isinstance(report_summary.get('aggregated_data_enrichment'), dict):
-                for metric, value in report_summary['aggregated_data_enrichment'].items():
-                    if isinstance(value, (int, float)):
-                        aggregated_by_data_input[key][metric] += value
-
-            aggregated_by_data_input[key]['total_runs_completed'] += report_summary.get('total_runs_completed', 0)
-            aggregated_by_data_input[key]['total_saved_file_count'] += report_summary.get('total_saved_file_count', 0)
-            aggregated_by_data_input[key]['total_failed_download_count'] += report_summary.get('total_failed_download_count', 0)
-
-            # --- Individual Bot Metrics ---
-            username = central_task.profile
-            if username:
-                current_report_end_dt_str_bot = report_summary.get('latest_report_end_datetime')
-                current_report_end_dt_bot = datetime.datetime.min.replace(tzinfo=timezone.utc)
-                if current_report_end_dt_str_bot:
-                    try:
-                        current_report_end_dt_bot = datetime.datetime.fromisoformat(current_report_end_dt_str_bot.replace('Z', '+00:00'))
-                    except ValueError:
-                        logger.warning(f"Could not parse datetime '{current_report_end_dt_str_bot}' for bot metrics task {task_uuid[:8]}.")
-
-                bot_entry = individual_bot_metrics[username]
-
-                if current_report_end_dt_bot > bot_entry['latest_report_end_datetime']:
-                    bot_entry['status'] = report_summary.get('latest_overall_bot_login_status', 'N/A')
-                    bot_entry['latest_report_end_datetime'] = current_report_end_dt_bot
-                elif current_report_end_dt_bot == bot_entry['latest_report_end_datetime']:
-                    if report_summary.get('latest_overall_bot_login_status') == 'Logged Out':
-                        bot_entry['status'] = 'Logged Out'
-                
-                if isinstance(report_summary.get('aggregated_scraped_data'), dict):
-                   for metric, value in report_summary['aggregated_scraped_data'].items():
-                       if isinstance(value, (int, float)):
-                           bot_entry[metric] = bot_entry.get(metric, 0) + value
-                
-                if isinstance(report_summary.get('aggregated_data_enrichment'), dict):
-                   for metric, value in report_summary['aggregated_data_enrichment'].items():
-                       if isinstance(value, (int, float)):
-                           bot_entry[metric] = bot_entry.get(metric, 0) + value
-
-                bot_entry['total_runs_completed'] += report_summary.get('total_runs_completed', 0)
-                bot_entry['total_saved_file_count'] += report_summary.get('total_saved_file_count', 0)
-                bot_entry['total_failed_download_count'] += report_summary.get('total_failed_download_count', 0)
-                bot_entry['associated_task_uuids'].append(task_uuid)
-
-            # --- Overall ScrapeTask Status & Critical Issues ---
-            task_status = report_summary.get('latest_overall_task_status')
-            if task_status == 'Failed':
-                overall_scrape_task_status = 'Failed'
-            elif task_status == 'Incomplete' and overall_scrape_task_status != 'Failed':
-                overall_scrape_task_status = 'Incomplete'
-            elif task_status == 'Running' and overall_scrape_task_status not in ['Failed', 'Incomplete']:
-                overall_scrape_task_status = 'Running'
-
-            if report_summary.get('latest_overall_bot_login_status') == 'Logged Out':
-                critical_issues.append(f"Bot for task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}) is LOGGED OUT.")
-            if 'exception(s) detected' in str(report_summary.get('all_exceptions')).lower():
-                critical_issues.append(f"Exception detected in task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}).")
-            if 'billing issues' in str(report_summary.get('latest_billing_issue_resolution_status')).lower() and \
-               'n/a' not in str(report_summary.get('latest_billing_issue_resolution_status')).lower():
-                critical_issues.append(f"Billing issue for task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}).")
-            if report_summary.get('total_failed_download_count', 0) > 0:
-                critical_issues.append(f"Failed downloads in task `{task_uuid[:8]}` (Service: {central_task.service or 'N/A'}).")
+            # Aggregate metrics
+            key = (task.data_point, task.input)
+            aggregated_by_data_input[key]['total_users_scraped'] += summary.get("total_users_scraped", 0)
+            aggregated_by_data_input[key]['total_downloaded_files'] += summary.get("total_downloaded_files", 0)
+            aggregated_by_data_input[key]['total_storage_uploads'] += summary.get("total_storage_uploads", 0)
+            aggregated_by_data_input[key]['failed_to_download_file_count'] += summary.get("failed_to_download_file_count", 0)
+            aggregated_by_data_input[key]['critical_events'] += summary.get("total_critical_events", 0)
+            aggregated_by_data_input[key]['total_runs_completed'] += summary.get("total_reports_considered", 0)
             
-        # Step 5: Conditional Slack Message
+
+            # Individual bot metrics
+            username = task.profile
+            if username:
+                individual_bot_metrics[username] = {
+                    "status": summary.get("latest_login_status", "N/A"),
+                    "total_users_scraped": summary.get("total_users_scraped", 0),
+                    "failed_downloads_details": summary.get("failed_downloads_details"),
+                    "critical_events_summary": summary.get("critical_events_summary"),
+                    "total_runs_completed": summary.get("total_reports_considered",0)
+
+                }
+
+            # Overall status & critical issues
+            latest_task_status = summary.get("latest_task_status")
+            if "Failed" in latest_task_status:
+                overall_scrape_task_status = "Failed"
+            elif latest_task_status == "Incomplete" and overall_scrape_task_status != "Failed":
+                overall_scrape_task_status = "Incomplete"
+
+            if summary.get("failed_downloads_details"):
+                critical_issues.append(f"Task {task.uuid[:8]} has failed downloads.")
+            if summary.get("total_critical_events", 0) > 0:
+                critical_issues.append(f"Task {task.uuid[:8]} has {summary['total_critical_events']} critical events.")
+
+        # Send Slack alert if needed
         if should_send_notification:
             slack_blocks = _build_slack_message_blocks(
                 scrape_task=scrape_task,
                 overall_scrape_task_status=overall_scrape_task_status,
                 aggregated_by_data_input=aggregated_by_data_input,
                 individual_bot_metrics=individual_bot_metrics,
-                critical_issues=critical_issues
+                critical_issues=critical_issues,
             )
 
-            # Send the message
             try:
-                # Using a hardcoded channel as in your original snippet. Consider making this configurable.
-                send_slack_message(slack_blocks, channel='Client') 
-                logger.info(f"Successfully sent Slack alert for ScrapeTask: {scrape_task.name} due to new data.")
-                
-                # --- Update Redis after successful Slack notification ---
+                send_slack_message(slack_blocks, channel="Client")
+                logger.info(f"Slack alert sent for ScrapeTask: {scrape_task.name}")
+
+                # Update Redis keys
                 for task_uuid_to_update, timestamp_str in newly_processed_task_timestamps.items():
-                    redis_key = f"last_notified_task_summary:{task_uuid_to_update}"
-                    redis_conn.set(redis_key, timestamp_str)
-                    logger.debug(f"Updated Redis key {redis_key} with timestamp {timestamp_str}")
-                # --- End Redis Update ---
+                    redis_conn.set(f"last_notified_task_summary:{task_uuid_to_update}", timestamp_str)
+                    logger.debug(f"Updated Redis {task_uuid_to_update} -> {timestamp_str}")
 
             except Exception as e:
                 logger.error(f"Failed to send Slack message for ScrapeTask {scrape_task.name}: {e}")
-                logger.error("Ensure Slack integration is correctly configured and bot has permissions.")
         else:
-            logger.info(f"No new data detected for ScrapeTask: {scrape_task.name}. Skipping Slack notification.")
-            
-    logger.info('Scrape task alerts processing finished.')
-@shared_task
-def update_childbot_statuses():
-    logger.info("🚀 Starting Childbot login status update process.")
-     
-    # Step 1: Connect to Redis
-    redis_conn = get_redis_connection("default")
+            logger.info(f"No new data for ScrapeTask: {scrape_task.name}. Skipping Slack notification.")
 
-    # Step 2: Get Reporting House URL
-    reporting_house = Server.objects.filter(instance_type='reporting_and_analytics_server').first()
-    if not reporting_house or not reporting_house.public_ip:
-        logger.error("❌ Reporting House server not configured properly. Aborting update.")
-        return False
-
-    base_url = reporting_house.public_ip.rstrip('/') + "/reporting/task-summaries/"
-
-    # Step 3: Fetch Tasks with data_point = 'login'
-    login_tasks = Task.objects.filter(data_point='login')
-    if not login_tasks.exists():
-        logger.warning("⚠️ No login tasks found. Nothing to update.")
-        return
-
-    updated_count = 0
-
-    for task in login_tasks:
-        task_uuid = str(task.uuid)
-        redis_key = f"last_notified_bot_status:{task_uuid}"
-
-        # Step 4: Check last updated time in Redis
-        last_notified_bytes = redis_conn.get(redis_key)
-        last_notified_dt = None
-        if last_notified_bytes:
-            try:
-                last_notified_dt = datetime.datetime.fromisoformat(
-                    last_notified_bytes.decode('utf-8').replace('Z', '+00:00')
-                )
-            except ValueError:
-                logger.warning(f"⚠️ Invalid Redis timestamp for {task_uuid}, will treat as new.")
-
-        # Step 5: Fetch summary from Reporting House
-        try:
-            response = requests.get(f"{base_url}{task_uuid}/", timeout=10)
-            response.raise_for_status()
-            summary = response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Failed to fetch report for task {task_uuid}: {e}")
-            continue
-
-        # Step 6: Get latest report timestamp
-        latest_dt_str = summary.get("latest_report_end_datetime")
-        if not latest_dt_str:
-            logger.warning(f"⚠️ No report datetime in summary for task {task_uuid}")
-            continue
-
-        try:
-            latest_dt = datetime.datetime.fromisoformat(latest_dt_str.replace('Z', '+00:00'))
-        except ValueError:
-            logger.warning(f"⚠️ Invalid datetime format in report: {latest_dt_str}")
-            continue
-
-        # Step 7: Skip if report is not newer
-        if last_notified_dt is not None and latest_dt <= last_notified_dt:
-            continue
-
-        # Step 8: Match task.profile with ChildBot.username
-        if not task.profile:
-            logger.warning(f"⚠️ Task {task_uuid} has no profile. Skipping.")
-            continue
-
-        try:
-            bot = ChildBot.objects.get(username=task.profile)
-        except ChildBot.DoesNotExist:
-            logger.warning(f"⚠️ No ChildBot found for username '{task.profile}' (task {task_uuid})")
-            continue
-
-        # Step 9: Update login status
-        login_status = summary.get("latest_overall_bot_login_status", "Unknown")
-        is_logged_in = login_status.lower() == "logged in"
-
-        bot.logged_in = is_logged_in
-        bot.save(update_fields=["logged_in"])
-        updated_count += 1
-
-        # Step 10: Update Redis to avoid duplicate notifications
-        redis_conn.set(redis_key, latest_dt_str)
-        logger.info(f"✅ Updated Childbot '{bot.username}' login status to {is_logged_in} (task {task_uuid})")
-
-    logger.info(f"✅ Childbot login status update complete. {updated_count} bots updated.")
+    logger.info("Scrape task alerts processing finished.")
 
 def _build_slack_message_blocks(scrape_task, overall_scrape_task_status,
                                  aggregated_by_data_input, individual_bot_metrics,
                                  critical_issues):
     """
-    Helper function to construct the Slack message blocks.
+    Helper function to construct the Slack message blocks with new TaskSummaryReportNew fields.
     """
     from datetime import timezone
     blocks = []
@@ -893,128 +821,127 @@ def _build_slack_message_blocks(scrape_task, overall_scrape_task_status,
     })
     blocks.append({"type": "divider"})
 
-    # Critical Issues Section
+    # Critical Issues
     if critical_issues:
         blocks.append({
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "🚨 *Critical Issues Detected:*"
-            }
+            "text": {"type": "mrkdwn", "text": "🚨 *Critical Issues Detected:*"}
         })
-        for issue in sorted(list(set(critical_issues))): # Use set to avoid duplicate issue messages, then sort
+        for issue in sorted(set(critical_issues)):
             blocks.append({
                 "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"• {issue}"
-                }
+                "text": {"type": "mrkdwn", "text": f"• {issue}"}
             })
         blocks.append({"type": "divider"})
 
-    # Aggregated by Data Point and Input
+    # Aggregated Data
     blocks.append({
         "type": "section",
-        "text": {
-            "type": "mrkdwn",
-            "text": "*🔬 Aggregated Data by Target:*"
-        }
+        "text": {"type": "mrkdwn", "text": "*🔬 Aggregated Data by Target:*"}
     })
     if aggregated_by_data_input:
-        # Sort by data_point and input for consistent output
-        sorted_aggregated_data = sorted(aggregated_by_data_input.items(), key=lambda item: (item[0][0], item[0][1]))
-        for (data_point, input_value), metrics in sorted_aggregated_data:
+        sorted_aggregated = sorted(aggregated_by_data_input.items(), key=lambda item: (item[0][0], item[0][1]))
+        for (data_point, input_value), metrics in sorted_aggregated:
             metrics_text = []
-            # Sort metrics alphabetically for consistent display
-            for metric_key in sorted(metrics.keys()):
-                value = metrics[metric_key]
-                if value:
-                    display_metric = metric_key.replace('_', ' ').title()
-                    if display_metric == 'Total Posts Scraped':
-                        display_metric = 'Posts Scraped'
-                    elif display_metric == 'Total Users Scraped':
-                        display_metric = 'Users Scraped'
-                    elif display_metric == 'Total Rows':
-                        display_metric = 'Rows Scraped/Enriched'
-                    elif display_metric == 'Total Runs Completed':
-                        display_metric = 'Runs Completed'
-                    elif display_metric == 'Total Saved File Count':
-                        display_metric = 'Files Saved'
-                    elif display_metric == 'Total Failed Download Count':
-                        display_metric = 'Failed Downloads'
+            for key, value in sorted(metrics.items()):
+                if not value:
+                    continue
+                display_key = key.replace('_', ' ').title()
+                if key == "total_users_scraped":
+                    display_key = "Users Scraped"
+                elif key == "total_downloaded_files":
+                    display_key = "Files Downloaded"
+                elif key == "total_storage_uploads":
+                    display_key = "Files Uploaded"
+                elif key == "failed_to_download_file_count":
+                    display_key = "Failed Downloads"
+                elif key == "critical_events":
+                    display_key = "Critical Events"
+                elif key == "total_runs_completed":
+                    display_key = "Total Runs Completed"
 
-                    metrics_text.append(f"{display_metric}: *{value}*")
+                metrics_text.append(f"{display_key}: *{value}*")
 
             if metrics_text:
                 blocks.append({
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"*{data_point.replace('_', ' ').title()} - Input: `{input_value}`*\n" + ", ".join(metrics_text)
+                        "text": f"*{data_point}* (Input: `{input_value}`)\n" + ", ".join(metrics_text)
                     }
                 })
         blocks.append({"type": "divider"})
     else:
         blocks.append({
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "No aggregated data metrics available for this ScrapeTask."
-            }
+            "text": {"type": "mrkdwn", "text": "No aggregated data available for this ScrapeTask."}
         })
         blocks.append({"type": "divider"})
 
-
-    # Individual Bot Statuses
+    # Individual Bot Metrics
     blocks.append({
         "type": "section",
-        "text": {
-            "type": "mrkdwn",
-            "text": "*🤖 Individual Bot Statuses:*"
-        }
+        "text": {"type": "mrkdwn", "text": "*🤖 Individual Bot Statuses:*"}
     })
     if individual_bot_metrics:
-        # Sort by username for consistent output
-        sorted_bot_metrics = sorted(individual_bot_metrics.items(), key=lambda item: item[0])
-        for username, bot_info in sorted_bot_metrics:
-            bot_status_emoji = "✅" if bot_info['status'] == "Logged In" else "❌"
-            
-            # Filter and sort metrics for display
-            display_metrics = []
-            for metric_key in sorted(bot_info.keys()):
-                if metric_key not in ['status', 'latest_report_end_datetime', 'associated_task_uuids']:
-                    value = bot_info[metric_key]
-                    if value:
-                        display_metric = metric_key.replace('_', ' ').title()
-                        if display_metric == 'Total Posts Scraped':
-                            display_metric = 'Posts Scraped'
-                        elif display_metric == 'Total Users Scraped':
-                            display_metric = 'Users Scraped'
-                        elif display_metric == 'Total Rows':
-                            display_metric = 'Rows Scraped/Enriched'
-                        elif display_metric == 'Total Runs Completed':
-                            display_metric = 'Runs Completed'
-                        elif display_metric == 'Total Saved File Count':
-                            display_metric = 'Files Saved'
-                        elif display_metric == 'Total Failed Download Count':
-                            display_metric = 'Failed Downloads'
-                        display_metrics.append(f"{display_metric}: *{value}*")
-            
+        for username, bot_info in sorted(individual_bot_metrics.items(), key=lambda item: item[0]):
+            status = bot_info.get("status", "N/A")
+            emoji = "✅" if status.lower() == "success" else "❌"
+
+            metrics_lines = []
+            for key, value in bot_info.items():
+                if key in ['status', 'latest_report_end_datetime', 'associated_task_uuids']:
+                    continue
+                if not value:
+                    continue
+
+                display_key = key.replace('_', ' ').title()
+                if key == "total_users_scraped":
+                    display_key = "Users Scraped"
+                elif key == "total_downloaded_files":
+                    display_key = "Files Downloaded"
+                elif key == "total_storage_uploads":
+                    display_key = "Files Uploaded"
+                elif key == "failed_to_download_file_count":
+                    display_key = "Failed Downloads"
+                elif key == "critical_events_summary":
+                    display_key = "Critical Events"
+                elif key == "total_runs_completed":
+                    display_key = "Total Runs Completed"
+
+                # 👇 Pretty formatting
+                if isinstance(value, list):
+                    # Show first 2 items nicely, then "and N more..."
+                    if len(value) > 0:
+                        formatted_items = []
+                        for item in value[:2]:  # limit output
+                            if isinstance(item, dict):
+                                formatted_items.append("> " + ", ".join(f"*{k}*: {v}" for k, v in item.items() if v))
+                            else:
+                                formatted_items.append(f"> {item}")
+                        if len(value) > 2:
+                            formatted_items.append(f"> …and {len(value)-2} more")
+                        metrics_lines.append(f"*{display_key}:*\n" + "\n".join(formatted_items))
+                elif isinstance(value, dict):
+                    formatted_items = [f"*{k}*: {v}" for k, v in value.items() if v]
+                    metrics_lines.append(f"*{display_key}:*\n" + "\n".join(["> " + line for line in formatted_items]))
+                else:
+                    metrics_lines.append(f"*{display_key}:* {value}")
+
             blocks.append({
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"• *Bot: {username}* Status: {bot_status_emoji} {bot_info['status']}\n  " + ", ".join(display_metrics)
+                    "text": f"• *Bot:* `{username}`  Status: {emoji} {status}\n" + "\n".join(metrics_lines)
                 }
             })
+
+
         blocks.append({"type": "divider"})
     else:
         blocks.append({
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "No individual bot metrics available for this ScrapeTask."
-            }
+            "text": {"type": "mrkdwn", "text": "No individual bot metrics available."}
         })
         blocks.append({"type": "divider"})
 
@@ -1022,14 +949,14 @@ def _build_slack_message_blocks(scrape_task, overall_scrape_task_status,
     blocks.append({
         "type": "context",
         "elements": [
-            {
-                "type": "mrkdwn",
-                "text": f"Generated for ScrapeTask ID: `{scrape_task.uuid}` at {datetime.datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
-            }
+            {"type": "mrkdwn", "text": f"Generated at {datetime.datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"}
         ]
     })
 
     return blocks
+
+
+
 
 from celery import shared_task
 import requests
@@ -1075,6 +1002,7 @@ def collect_system_status():
         except ValueError:
             print(f"[{datetime.datetime.now()}] Error decoding JSON from {server.name}")
 
+
 @shared_task
 def process_event_for_servers(event_id):
    
@@ -1110,6 +1038,8 @@ def process_event_for_servers(event_id):
         print(f"Event with ID {event_id} not found.")
     except Exception as e:
         print(f"Error processing event for models {event_id}: {e}")
+
+
 
 @shared_task
 def check_resource_alerts():
@@ -1152,6 +1082,9 @@ def send_alert_email(subject, body, recipients, smtp_server, smtp_port, smtp_use
     except Exception as e:
         print(f"[{datetime.datetime.now()}] Central server error sending email: {e}")
 
+
+
+
 from celery import shared_task
 import datetime as dt
 from django.utils import timezone
@@ -1159,6 +1092,8 @@ from .models import Server, Heartbeat, ResourceUsage
 from django.conf import settings
 from django.core.mail import send_mail
 import pytz
+
+
 @shared_task
 def monitor_server_health():
     print(timezone.now())
@@ -1412,6 +1347,7 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Incorrect Password for profile '{profile_name}'. {affected_tasks.count()} tasks updated.")
+                        send_slack_alert_down_services(f"Issue created: Incorrect Password for profile '{profile_name}'. {affected_tasks.count()} tasks updated.")
 
             # ---------- Condition 2: Login Attempt Failed > 10 ----------
             login_attempt_failed = summary.get("total_attempt_failed", 0)
@@ -1433,6 +1369,7 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Login Attempts Failed for '{profile_name}'. {affected_tasks.count()} tasks updated.")
+                        send_slack_alert_down_services(f"Issue created: Login Attempts Failed for '{profile_name}'. {affected_tasks.count()} tasks updated.")
 
             # ---------- Condition 3: Storage Upload Failed ----------
             storage_upload_failed = summary.get("storage_upload_failed", 0)
@@ -1453,7 +1390,7 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Storage House Down. {affected_tasks.count()} tasks updated.")
-
+                        send_slack_alert_down_services(f"Issue created: Storage House Down. {affected_tasks.count()} tasks updated.")
         except requests.RequestException as e:
             logger.error(f"Network error fetching summary for Task {task_uuid}: {e}")
             logger.debug(traceback.format_exc())
@@ -1462,3 +1399,41 @@ def fetch_and_update_task_errors():
             logger.debug(traceback.format_exc())
         
     logger.info("fetch_and_update_task_errors task completed.")
+
+
+
+def send_slack_alert_down_services(message):
+    users = ["U098VMEG552",]
+    for user in users:
+        task = {
+                    "service":"slack",
+                    "end_point":"Messenger",
+                    "data_point":"send_dm_to_user",
+                    "api_key":"",
+                    "ref_id": str(uuid.uuid1()),
+                    
+                    "add_data":{
+                        "data_source":{
+                            "type":"data_house",
+                            "object_type":"output",
+                            "lock_results":True,
+                        },
+                        "name":"test",
+                        "is_private":True,
+                        "channel_id":"C05CX2WU9MY",
+                        "user_id":user,
+                        'limit':100,
+                        'query':'Arqam',
+                        "message":message,
+                        "save_data_to_data_house":True,
+                        "save_output_as_output":True
+                        },
+                    "repeat":False,
+                    "repeat_duration":"1m",
+                    "uuid":str(uuid.uuid1())
+                }
+        
+        e=Slack()
+        e.run_bot(task)
+
+

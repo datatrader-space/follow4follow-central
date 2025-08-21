@@ -21,7 +21,7 @@ def send_structured_slack_message(blocks: list, channel: str = 'DEV'):
     if channel.upper() == 'DEV':
         webhook_url = 'https://hooks.slack.com/services/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'
     elif channel.upper() == 'CLIENT':
-        webhook_url = 'https://hooks.slack.com/services/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'#'https://hooks.slack.com/services/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'
+        webhook_url = 'https://hooks.slack.com/services/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'#'https://hooks.slack.com/services/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'
     elif channel.upper() == 'MANAGER':
         webhook_url = 'https://hooks.slack.com/services/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'
     else:

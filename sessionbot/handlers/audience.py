@@ -326,7 +326,8 @@ def handle_audience_creation(a, payload):
     for idx, step in enumerate(workflow_steps): 
         step_type = step.get('type')
         step_data = step.get('data')
-
+        lock_results = False
+        lock_type=False
         print(f"Creating {step_type} task...")
 
         if idx == 0:
@@ -354,19 +355,25 @@ def handle_audience_creation(a, payload):
             # Conditionally set data_point
             if step_type == "enrichments" and step_data.get("enrichments_type") == "gender_nationality_enrichment":
                 task_data_point = "enrich"
+                lock_type='data_point'
+                lock_results=True
+                
             else:
                 task_data_point = "retrieve_from_datahouse" if step_type == "cleaning" else "enrich_social_media_profile"
-        lock_results = True
-
+            
         # Modify lock_results conditionally
         if task_data_point == "retrieve_from_datahouse":
-            lock_results = False
+            lock_results = True
+            lock_type='task'
         
         # Default service
         if step_type == "enrichments" and step_data.get("enrichments_type") == "user_info_enrichment":
             task_service ="instagram"
             task_end_point = "user"
             task_data_point = "bulk_user_info_scraper"
+            lock_results=True
+            
+            lock_type='data_point'
         
         service_value = "openai" if step_type == "enrichments" else ""
         from ..models import Server  
@@ -389,7 +396,8 @@ def handle_audience_creation(a, payload):
                     "filters": filters,
                     "size": 30,
                     "lock_results": lock_results,
-                    "datahouse_url": datahouse + "datahouse/api/consume/",
+                    "lock_type":lock_type,
+                    "datahouse_url": datahouse ,
                     "reporting_house_url": analytics + "reporting/task-reports/",
                     "storage_house_url" : storagehouse + "storagehouse/api/upload",
                     "save_to_storage_house": True
@@ -430,10 +438,7 @@ def handle_audience_creation(a, payload):
                 "service": service_value,
             })
         
-        if task_data_point != "retrieve_from_datahouse":
-            task_data["add_data"].update({
-                "lock_type": "data_point"
-            })
+        
     
         if task_data_point in [
             "enrich",

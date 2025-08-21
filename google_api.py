@@ -168,6 +168,7 @@ class GoogleSheet(GoogleAPI):
        
     def initialize_connection(self):
         credentials=json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+        print(credentials)
         try:     
             self.connection= gspread.service_account_from_dict(credentials)
         except Exception as e:
