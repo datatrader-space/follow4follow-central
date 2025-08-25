@@ -282,7 +282,11 @@ class Server(BaseModel):
     access_secret_key=models.CharField(unique=True,max_length=5000,null=True,blank=True)
     maximum_parallel_tasks_allowed = models.IntegerField(default=1)
     created_on = models.DateTimeField(default=timezone.now)
-    uuid=models.UUIDField(blank=False,null=True,unique=True,default=uuid.uuid1())
+    uuid = models.UUIDField(
+        default=uuid.uuid1,
+        unique=True,
+        editable=False
+    )
 
     def __str__(self):
         return self.name

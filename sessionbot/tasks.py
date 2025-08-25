@@ -13,228 +13,184 @@ import requests
 import json
 from django.conf import settings
 from .models import DataHouseSyncStatus,ChildBot,Server
+from sessionbot.utils import DataHouseClient
 from services.slack.run_bot import Slack
+
+
+
+from sessionbot.utils import convert_uuid_datetime_for_json
+from sessionbot.models import Task, ChildBot, Device, Proxy, DataHouseSyncStatus, Server
+import sessionbot.handlers.bots as bot_handler
+import sessionbot.handlers.device as device_handler
+from sessionbot.utils import convert_uuid_datetime_for_json
+from django.forms import model_to_dict
 @shared_task()
 def sync_with_data_house_and_workers():
     """
-    Celery task to sync with Data House and Workers (Data House is default).
+    Unified sync with Data House and Workers.
+    - Preserves real task statuses ('running', 'completed', etc.).
+    - Sends ChildBot + Device resources first.
+    - Tasks marked _delete are cleaned after successful sync.
+    - Prevents resending tasks already registered.
     """
-    data_house_url=False
-    datahouse_server=Server.objects.all().filter(instance_type='data_server')
-    if datahouse_server:
-        data_house_url=datahouse_server[0].public_ip+'datahouse/api/sync/'
-   
-    if not data_house_url:
-        print("Error: DATA_HOUSE_URL setting is not defined.")
+
+    # -----------------------
+    # 1. Determine Data House URL
+    # -----------------------
+    datahouse_server = Server.objects.filter(instance_type='data_server').first()
+    if not datahouse_server:
+        print("Error: No Data House server configured.")
         return
+    datahouse_url = f"{datahouse_server.public_ip}datahouse/api/sync/"
+    target_payloads = {datahouse_url: []}
+    all_successful_sync_ids = {}
 
-    target_payloads = {data_house_url: []}
-    unique_object_ids = DataHouseSyncStatus.objects.values_list('object_id', flat=True).distinct()
-
-    for object_id in unique_object_ids:
-        with transaction.atomic():
-            statuses = DataHouseSyncStatus.objects.filter(object_id=object_id).order_by('created_at')
-
-            final_operation = None
-            object_body = None
-            model_instance = None
-            model_class = None
-
-            for i,status in enumerate(statuses):
-                final_operation = status.operation
-                model_class_name = status.model_name
-                try:
-                    model_class = apps.get_model('sessionbot', model_class_name)  # Replace 'your_app_name'
-                    print(object_id)
-                    model_instance = model_class.objects.get(uuid=object_id)
-                    if not model_instance:
-                        status.delete()
-                        continue
-                    object_body = model_instance.__dict__.copy()
-                    if '_state' in object_body:
-                        del object_body['_state']
-                    print(object_body)
-                    for key, value in object_body.items():
-                        
-                        print( isinstance(value, datetime.datetime))
-                        if isinstance(value, models.Model):
-                            print('m')
-                            object_body[key] = str(value)
-                        elif isinstance(value, datetime.datetime):
-                            print('dt')
-                            object_body[key] = value.isoformat()
-                        elif isinstance(value, uuid.UUID):
-                            print('t')
-                            object_body[key] = str(value)
-                        elif isinstance(value, bool):
-                            object_body[key] = str(value).lower()
-
-                except model_class.DoesNotExist:
-                    print('model class not exist'+str(model_class))
-                    object_body = None
-                    model_instance = None
-                    continue
-                except Exception as e:
-                    print(f"Error retrieving object {object_id}: {e}")
-                    object_body = None
-                    model_instance = None
-                   
-               
-                   
-                    status.delete()
-                    continue
-        
-       
-            if not model_instance and not final_operation=='DELETE':
-                print(final_operation)
-                print('continuing')
-            
-                continue
-            from sessionbot.utils import convert_uuid_datetime_for_json
-            if final_operation=='DELETE':
-                object_body={}
-            else:
-                object_body=convert_uuid_datetime_for_json(model_instance)
-            message = {
-                "uuid": str(object_id),
-                "operation": final_operation,
-                "object_body": object_body,
-                "object_type": model_class_name if model_class else None,
-                "sync_id":status.id
-            }
-
-              # Default: Data House
-
-            if model_class and issubclass(model_class, (Task, ChildBot, Proxy,Device)):
-                try:
-                    if model_class==Task:
-                        server = model_instance.server
-                    if model_class==ChildBot:
-                        server=model_instance.logged_in_on_servers
-                    if model_class==Device:
-                        server=model_instance.connected_to_server
-                    worker_url = f"{server.public_ip}crawl/api/sync/"
-                    if worker_url not in target_payloads:
-                        target_payloads[worker_url] = []
-                    target_payloads[worker_url].append(message)
-                except AttributeError:
-                    print(f"Object {object_id} has no server assigned, syncing with datahouse.")
-                except Exception as e:
-                    print(f"Error getting worker URL: {e}. Syncing with datahouse.")
-
-            target_payloads[data_house_url].append(message) # Always send to datahouse
-
-    all_successful_uuids = {}
-    if len(target_payloads)==0:
-        return True
-
-    for target_url, payloads in target_payloads.items():
-        if len(payloads)==0:
+    # -----------------------
+    # 2. Collect objects to sync
+    # -----------------------
+    object_ids = DataHouseSyncStatus.objects.values_list('object_id', flat=True).distinct()
+    for object_id in object_ids:
+        statuses = DataHouseSyncStatus.objects.filter(object_id=object_id).order_by("created_at")
+        if not statuses.exists():
             continue
-        headers = {"Content-Type": "application/json"}
+        final_status = statuses.last()
+        model_class_name = final_status.model_name
         try:
-            response = requests.post(target_url, data=json.dumps({'data':payloads}), headers=headers)
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("error"):
-                print(f"{target_url} returned an error: {data['error']}")
-                continue
-
-            successful_uuids = data.get("successful_sync_ids", {})
-            for object_type, uuids in successful_uuids.items():
-                all_successful_uuids.setdefault(object_type, []).extend(uuids)
-
-        except requests.exceptions.RequestException as e:
-            print(f"Error sending sync payload to {target_url}: {e}")
+            model_class = apps.get_model("sessionbot", model_class_name)
+            instance = model_class.objects.get(uuid=object_id)
+        except model_class.DoesNotExist:
+            DataHouseSyncStatus.objects.filter(object_id=object_id).delete()
             continue
-    print(all_successful_uuids)
-    for object_type, sync_id in all_successful_uuids.items():
-        try:
-            DataHouseSyncStatus.objects.filter(id__in=sync_id).delete()
-            print(f"DataHouseSyncStatus records for {object_type} with UUIDs {uuids} deleted.")
         except Exception as e:
-            print(f"Error deleting DataHouseSyncStatus records: {e}")
-
-    print("Data house sync task completed.")
-    return# ... (rest of the code)
-@shared_task()
-def communicate_tasks_with_worker():
-    import json
-    import requests as r
-    from django.forms import model_to_dict
-    unregistered_tasks=Task.objects.all().filter(registered=False)
-    delete_tasks=Task.objects.all().filter(_delete=True)
-    
-    unregistered_task=unregistered_tasks.union(delete_tasks)
-    print(unregistered_task)
-    _={}
-    for task in unregistered_task:
-        if task.server:
-   
-            if task.server.public_ip in _.keys():
-                pass
-            else:
-                _.update({task.server.public_ip:{'tasks':[],'resources':{'devices':[],'bots':[]}}})
-        else:
+            print(f"Error retrieving object {object_id}: {e}")
             continue
-        if task._delete:
-            method='delete'
-        else:
-            method='create'
-        active_dict=_[task.server.public_ip]
-        _task=model_to_dict(task)
-        if task.dependent_on:        
-            _task.update({'dependent_on':str(task.dependent_on.uuid)})
-        _task.update({'method':method,'ref_id':str(_task['ref_id'])})
-        _task.update({'created_at':str(_task['created_at'])})
-        active_dict['tasks'].append(_task)
-        
-      
-        import sessionbot.handlers.bots as bot
-        import sessionbot.handlers.device as device
-        _bot=None
+
+        object_body = {} if final_status.operation == "DELETE" else convert_uuid_datetime_for_json(instance)
+        message = {
+            "uuid": str(object_id),
+            "operation": final_status.operation,
+            "object_body": object_body,
+            "object_type": model_class_name,
+            "sync_id": final_status.id,
+        }
+        target_payloads[datahouse_url].append(message)
+
+        # -----------------------
+        # 2a. Send to worker if applicable
+        # -----------------------
+        worker_url = None
+        try:
+            if isinstance(instance, Task) and instance.server:
+                worker_url = f"{instance.server.public_ip}crawl/api/sync/"
+            elif isinstance(instance, ChildBot) and instance.logged_in_on_servers:
+                worker_url = f"{instance.logged_in_on_servers.public_ip}crawl/api/sync/"
+            elif isinstance(instance, Device) and instance.connected_to_server:
+                worker_url = f"{instance.connected_to_server.public_ip}crawl/api/sync/"
+            if worker_url:
+                target_payloads.setdefault(worker_url, []).append(message)
+        except Exception as e:
+            print(f"Error resolving worker URL for {object_id}: {e}")
+
+    # -----------------------
+    # 3. Send sync payloads to Data House & Workers
+    # -----------------------
+    for target_url, payloads in target_payloads.items():
+        if not payloads:
+            continue
+        try:
+            resp = requests.post(
+                target_url,
+                data=json.dumps({"data": payloads}),
+                headers={"Content-Type": "application/json"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            successful_ids = data.get("successful_sync_ids", {})
+            for obj_type, sync_ids in successful_ids.items():
+                all_successful_sync_ids.setdefault(obj_type, []).extend(sync_ids)
+        except Exception as e:
+            print(f"Error syncing with {target_url}: {e}")
+
+    # -----------------------
+    # 4. Cleanup successfully synced entries
+    # -----------------------
+    for obj_type, sync_ids in all_successful_sync_ids.items():
+        DataHouseSyncStatus.objects.filter(id__in=sync_ids).delete()
+        print(f"✅ Synced and cleaned {obj_type} → {sync_ids}")
+
+    # -----------------------
+    # 5. Prepare Worker Tasks and Resources
+    # -----------------------
+    active_tasks = Task.objects.filter(_delete=False, registered=False)  # skip already registered
+    delete_tasks = Task.objects.filter(_delete=True)  # include deletes
+    workers_payload = {}
+
+    for task in active_tasks.union(delete_tasks):
+        if not task.server:
+            continue
+        worker_ip = task.server.public_ip
+        workers_payload.setdefault(worker_ip, {"tasks": [], "resources": {"bots": [], "devices": []}})
+
+        # Attach bot + device resources first
+        _bot = None
         if task.profile:
-            _bot=bot.formatify_for_server(task.profile)   
-            if _bot:   
-                active_dict['resources']['bots'].append( {'type':'bot','data':_bot
-                                   ,'method':'create'})  
-            else:
-                continue
+            _bot = bot_handler.formatify_for_server(task.profile)
         elif task.alloted_bots:
-            for username in task.alloted_bots.split(','):
-                _bot=bot.formatify_for_server(username)    
-                if _bot:
+            for username in task.alloted_bots.split(","):
+                _bot = bot_handler.formatify_for_server(username)
 
-                    active_dict['resources']['bots'].append( {'type':'bot','data':_bot
-                                        ,'method':'create'}) 
-                else:
-                    continue
         if _bot:
-            if _bot['device']:
-                _device=device.formatify_for_worker(_bot['device'])
+            if _bot not in workers_payload[worker_ip]["resources"]["bots"]:
+                workers_payload[worker_ip]["resources"]["bots"].append({"type": "bot", "data": _bot, "method": "create"})
+            if _bot.get("device"):
+                _device = device_handler.formatify_for_worker(_bot["device"])
+                if _device not in workers_payload[worker_ip]["resources"]["devices"]:
+                    workers_payload[worker_ip]["resources"]["devices"].append({"type": "device", "data": _device, "method": "create"})
 
-                active_dict['resources']['devices'].append( {'type':'device','data':_device,'method':'create'})
-        
-      
-  
-    import time
-    
-    for key, value in _.items():
-        
-        resources_url=key+'crawl/api/resources/'
-        worker_tasks_url=key+'crawl/api/tasks/'
-        resp=r.post(resources_url,data=json.dumps({'resources':value['resources']}))
-        resp=r.post(worker_tasks_url,data=json.dumps(value['tasks']))
-        print(value['tasks'])
-        if resp.status_code==200:
-            unregistered_tasks.update(registered=True)
-            delete_tasks.delete()
-            
+        # Convert task to dict
+        task_dict = model_to_dict(task)
+        if task.dependent_on:
+            task_dict["dependent_on"] = str(task.dependent_on.uuid)
+        task_dict.update({
+            "method": "delete" if task._delete else "create",
+            "ref_id": str(task_dict.get("ref_id")),
+            "created_at": str(task_dict.get("created_at")),
+            "registered": True,
+            "status": task.status
+        })
+        workers_payload[worker_ip]["tasks"].append(task_dict)
 
-        import datetime as dt
-        print('sent request to worker at'+worker_tasks_url +str(dt.datetime.now()))
-        
+    # -----------------------
+    # 6. Send resources first, then tasks atomically
+    # -----------------------
+    for worker_ip, payload in workers_payload.items():
+        try:
+            resources_url = f"{worker_ip}crawl/api/resources/"
+            tasks_url = f"{worker_ip}crawl/api/tasks/"
+
+            # Send resources first
+            r = requests.post(
+                resources_url,
+                data=json.dumps({"resources": payload["resources"]}),
+                headers={"Content-Type": "application/json"}
+            )
+            r.raise_for_status()
+
+            # Send tasks second
+            t = requests.post(
+                tasks_url,
+                data=json.dumps(payload["tasks"]),
+                headers={"Content-Type": "application/json"}
+            )
+            t.raise_for_status()
+
+            # Mark sent tasks as registered
+            active_tasks.filter(server__public_ip=worker_ip).update(registered=True)
+            delete_tasks.filter(server__public_ip=worker_ip).delete()
+            print(f"✅ Worker {worker_ip} tasks & resources synced successfully")
+
+        except Exception as e:
+            print(f"Error sending resources/tasks to worker {worker_ip}: {e}")
         
         
 def send_comand_to_instance(instance_id, data, model_config=None):
@@ -293,17 +249,20 @@ def send_comand_to_instance(instance_id, data, model_config=None):
     return result
 
 
+
 @shared_task
 def update_childbot_statuses():
+    import datetime
     import requests
+    from django_redis import get_redis_connection
     from sessionbot.utils import DataHouseClient
-    from sessionbot.models import Task, Server
+    from sessionbot.models import Task, Server, ChildBot
+
     logger.info("🚀 Starting Childbot status update process.")
-    
     redis_conn = get_redis_connection("default")
 
-    reporting_house = Server.objects.filter(instance_type='reporting_and_analytics_server').first()
-    data_server = Server.objects.filter(instance_type='data_server').first()
+    reporting_house = Server.objects.filter(instance_type="reporting_and_analytics_server").first()
+    data_server = Server.objects.filter(instance_type="data_server").first()
     if not reporting_house or not reporting_house.public_ip:
         logger.error("❌ Reporting House server not configured properly. Aborting update.")
         return False
@@ -311,36 +270,22 @@ def update_childbot_statuses():
         logger.error("❌ Data server not found. Aborting update.")
         return False
 
-    base_url = reporting_house.public_ip.rstrip('/') + "/reporting/task-summaries/"
+    base_url = reporting_house.public_ip.rstrip("/") + "/reporting/task-summaries/"
     d = DataHouseClient()
     d.base_url = data_server.public_ip
 
-    profiles = Task.objects.exclude(profile__isnull=True).exclude(profile__exact='')\
-                .values_list('profile', flat=True).distinct()
-    if not profiles:
-        logger.warning("⚠️ No profiles found in tasks. Nothing to update.")
-        return
-
     updated_count = 0
 
-    for profile in profiles:
-        latest_task = Task.objects.filter(profile=profile).order_by('-created_at').first()
+    # ✅ 1. Iterate over all ChildBots
+    for bot in ChildBot.objects.all():
+        # 2. Find latest task for this bot
+        latest_task = Task.objects.filter(profile=bot.username).order_by("-created_at").first()
         if not latest_task:
             continue
 
         task_uuid = str(latest_task.uuid)
-        redis_key = f"last_notified_bot_status:{task_uuid}"
 
-        last_notified_bytes = redis_conn.get(redis_key)
-        last_notified_dt = None
-        if last_notified_bytes:
-            try:
-                last_notified_dt = datetime.datetime.fromisoformat(
-                    last_notified_bytes.decode('utf-8').replace('Z', '+00:00')
-                )
-            except ValueError:
-                logger.warning(f"⚠️ Invalid Redis timestamp for {task_uuid}, will treat as new.")
-
+        # 3. Fetch latest report
         try:
             response = requests.get(f"{base_url}{task_uuid}/", timeout=10)
             response.raise_for_status()
@@ -350,30 +295,38 @@ def update_childbot_statuses():
             continue
 
         latest_dt_str = summary.get("latest_report_end_datetime")
-        if not latest_dt_str:
+        login_status = summary.get("latest_login_status")
+        if not latest_dt_str or not login_status:
             continue
 
         try:
-            latest_dt = datetime.datetime.fromisoformat(latest_dt_str.replace('Z', '+00:00'))
+            latest_dt = datetime.datetime.fromisoformat(latest_dt_str.replace("Z", "+00:00"))
         except ValueError:
             continue
 
+        # 4. Check Redis (per bot)
+        redis_key = f"last_notified_bot_status:{bot.username}"
+        last_notified_bytes = redis_conn.get(redis_key)
+        last_notified_dt = None
+        if last_notified_bytes:
+            try:
+                last_notified_dt = datetime.datetime.fromisoformat(
+                    last_notified_bytes.decode("utf-8").replace("Z", "+00:00")
+                )
+            except ValueError:
+                pass
+
+        # ✅ Skip if no new report
         if last_notified_dt is not None and latest_dt <= last_notified_dt:
             continue
 
-        try:
-            bot = ChildBot.objects.get(username=profile)
-        except ChildBot.DoesNotExist:
-            continue
-
-        # --- Existing status updates ---
-        login_status = summary.get("latest_login_status", "Unknown")
+        # --- Update bot fields ---
         bot.logged_in = login_status.lower() == "success"
 
         last_run_str = summary.get("last_report_datetime")
         if last_run_str:
             try:
-                bot.last_run_at = datetime.datetime.fromisoformat(last_run_str.replace('Z', '+00:00'))
+                bot.last_run_at = datetime.datetime.fromisoformat(last_run_str.replace("Z", "+00:00"))
             except ValueError:
                 pass
 
@@ -381,23 +334,23 @@ def update_childbot_statuses():
         if scraped_so_far is not None:
             bot.scraped_so_far = scraped_so_far
 
-        data_point = summary.get("data_point")
+        data_point = latest_task.data_point
         if data_point and data_point.lower() != "login":
             bot.is_scraper = True
 
-        # --- NEW: Count API requests for this bot ---
-        bot_task_uuids = list(Task.objects.filter(profile=profile).values_list("uuid", flat=True))
+        # --- Count API requests ---
+        bot_task_uuids = list(Task.objects.filter(profile=bot.username).values_list("uuid", flat=True))
 
         if bot_task_uuids:
             successful_payload = {
                 "object_type": "requestlog",
                 "filters": {"task__uuid.in": bot_task_uuids, "status_code.in": [200]},
-                "count": True
+                "count": True,
             }
             failed_payload = {
                 "object_type": "requestlog",
                 "filters": {"task__uuid.in": bot_task_uuids, "status_code.in": [400, 401, 500]},
-                "count": True
+                "count": True,
             }
 
             successful_api_requests = d.retrieve(**successful_payload)
@@ -408,16 +361,38 @@ def update_childbot_statuses():
             if isinstance(failed_api_requests, dict):
                 bot.failed_api_requests = failed_api_requests.get("count", 0)
 
-        bot.save(update_fields=[
-            "logged_in", "last_run_at", "scraped_so_far", "is_scraper",
-            "successful_api_requests", "failed_api_requests"
-        ])
+        # Save updates to DB
+        bot.save(
+            update_fields=[
+                "logged_in",
+                "last_run_at",
+                "scraped_so_far",
+                "is_scraper",
+                "successful_api_requests",
+                "failed_api_requests",
+            ]
+        )
+
+        # 5. Only send Slack if login was SUCCESS
+        if login_status.lower() == "success":
+            slack_blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"✅ Bot *{bot.username}* just logged in successfully!",
+                    },
+                }
+            ]
+            send_slack_message(slack_blocks, channel="Client")
+            redis_conn.set(redis_key, latest_dt_str)  # remember last notification time
+            logger.info(f"🔔 Sent login notification for bot {bot.username}")
+
         updated_count += 1
 
-        redis_conn.set(redis_key, latest_dt_str)
-        logger.info(f"✅ Updated Childbot '{bot.username}' (task {task_uuid})")
+    logger.info(f"✅ Childbot status update complete. {updated_count} bots processed.")
 
-    logger.info(f"✅ Childbot status update complete. {updated_count} bots updated.")
+
 
 
 
@@ -426,7 +401,6 @@ def update_childbot_statuses():
 def analyze_and_create_update_metrics_for_scrapetask():
     import requests
     from django.db.models import Q
-    from sessionbot.utils import DataHouseClient
     from sessionbot.models import ScrapeTask, Task, Server
 
     # --- Data Server Metrics ---
@@ -1347,7 +1321,16 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Incorrect Password for profile '{profile_name}'. {affected_tasks.count()} tasks updated.")
-                        send_slack_alert_down_services(f"Issue created: Incorrect Password for profile '{profile_name}'. {affected_tasks.count()} tasks updated.")
+                        slack_blocks = [
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"Issue created: Incorrect Password for profile '{profile_name}'. {affected_tasks.count()} tasks updated.",
+                                },
+                            }
+                        ]
+                        send_slack_message(slack_blocks, channel="Client")
 
             # ---------- Condition 2: Login Attempt Failed > 10 ----------
             login_attempt_failed = summary.get("total_attempt_failed", 0)
@@ -1369,7 +1352,16 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Login Attempts Failed for '{profile_name}'. {affected_tasks.count()} tasks updated.")
-                        send_slack_alert_down_services(f"Issue created: Login Attempts Failed for '{profile_name}'. {affected_tasks.count()} tasks updated.")
+                        slack_blocks = [
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"Issue created: Login Attempts Failed for '{profile_name}'. {affected_tasks.count()} tasks updated.",
+                                },
+                            }
+                        ]
+                        send_slack_message(slack_blocks, channel="Client")
 
             # ---------- Condition 3: Storage Upload Failed ----------
             storage_upload_failed = summary.get("storage_upload_failed", 0)
@@ -1390,7 +1382,16 @@ def fetch_and_update_task_errors():
                         )
                         issue.affected_tasks.add(*affected_tasks)
                         logger.info(f"Issue created: Storage House Down. {affected_tasks.count()} tasks updated.")
-                        send_slack_alert_down_services(f"Issue created: Storage House Down. {affected_tasks.count()} tasks updated.")
+                        slack_blocks = [
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"Issue created: Storage House Down. {affected_tasks.count()} tasks updated.",
+                                },
+                            }
+                        ]
+                        send_slack_message(slack_blocks, channel="Client")
         except requests.RequestException as e:
             logger.error(f"Network error fetching summary for Task {task_uuid}: {e}")
             logger.debug(traceback.format_exc())
@@ -1400,40 +1401,5 @@ def fetch_and_update_task_errors():
         
     logger.info("fetch_and_update_task_errors task completed.")
 
-
-
-def send_slack_alert_down_services(message):
-    users = ["U098VMEG552",]
-    for user in users:
-        task = {
-                    "service":"slack",
-                    "end_point":"Messenger",
-                    "data_point":"send_dm_to_user",
-                    "api_key":"",
-                    "ref_id": str(uuid.uuid1()),
-                    
-                    "add_data":{
-                        "data_source":{
-                            "type":"data_house",
-                            "object_type":"output",
-                            "lock_results":True,
-                        },
-                        "name":"test",
-                        "is_private":True,
-                        "channel_id":"C05CX2WU9MY",
-                        "user_id":user,
-                        'limit':100,
-                        'query':'Arqam',
-                        "message":message,
-                        "save_data_to_data_house":True,
-                        "save_output_as_output":True
-                        },
-                    "repeat":False,
-                    "repeat_duration":"1m",
-                    "uuid":str(uuid.uuid1())
-                }
-        
-        e=Slack()
-        e.run_bot(task)
 
 

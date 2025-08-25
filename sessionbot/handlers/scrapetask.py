@@ -136,28 +136,59 @@ def handle_scrape_task_creation(scrapetask,start_scraping=True):
                 print(task)
                 
             
-
-def handle_scrapetask_state_change(scrapetask,state=False):
-    from sessionbot.models import Task, Log
+from django.utils import timezone
+def handle_scrapetask_state_change(scrapetask, state=None):
+    # Determine endpoint type
     if 'user' in scrapetask.input:
-        end_point='user'
+        end_point = 'user'
     elif 'location' in scrapetask.input:
-        end_point='location'
+        end_point = 'location'
     elif 'hashtag' in scrapetask.input:
-        end_point='hashtag'
+        end_point = 'hashtag'
     elif 'keyword' in scrapetask.input:
-        end_point='search'
-    st_tasks=Task.objects.all().filter(ref_id=scrapetask.uuid).filter(service=scrapetask.service).filter(end_point=end_point)
-    if state and state=='start':
-        st_tasks.update(state='pending')
-        st_tasks.update(paused=False)
-        l=Log(message='Changed State to Pending for '+str(len(st_tasks))+' Tasks for scrapetask '+scrapetask.name,label='INFO',end_point='scrapetask')
-        l.save()  
-    if state and state=='start':
-        st_tasks.update(state='stop')
-        st_tasks.update(paused=False)
-        l=Log(message='Changed State to Paused/Stopped for '+str(len(st_tasks))+' Tasks for scrapetask '+scrapetask.name,label='INFO',end_point='scrapetask')
-        l.save()  
+        end_point = 'search'
+    else:
+        end_point = 'unknown'
+
+    # Get all tasks related to this scrapetask
+    st_tasks = Task.objects.filter(
+        ref_id=scrapetask.uuid,
+        service=scrapetask.service,
+        end_point=end_point
+    )
+
+    updated_count = 0
+    message = ''
+    now_ts = timezone.now().timestamp()
+
+    if state == 'resume':
+        updated_count = st_tasks.update(
+            status='pending',
+            paused=False,
+            last_state_changed_at=now_ts
+        )
+        message = f"Resumed {updated_count} tasks for scrapetask {scrapetask.name}"
+
+    elif state == 'pause':
+        updated_count = st_tasks.update(
+            status='completed',
+            paused=True,
+            last_state_changed_at=now_ts
+        )
+        message = f"Paused {updated_count} tasks (marked as completed) for scrapetask {scrapetask.name}"
+
+    # Log the change
+    if updated_count > 0:
+        Log.objects.create(message=message, label='INFO', end_point='scrapetask')
+
+    return {
+        'scrapetask_id': scrapetask.id,
+        'scrapetask_name': scrapetask.name,
+        'updated_tasks': updated_count,
+        'new_state': state,
+        'message': message
+    }
+
 def handle_scrapetask_form_from_frontend(task):
     inputs=[]
     _={'service':'instagram','name':task.get('name'),'max_threads':task.get('max_threads'),'max_requests_per_day':task.get('max_requests_per_day')}

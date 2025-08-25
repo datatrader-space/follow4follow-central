@@ -83,6 +83,8 @@ class BulkCampaignAdmin(admin.ModelAdmin):
 #     filter_horizontal =('childbots',)
 # admin.site.register(ScrapeTask,ScrapeTaskAdmin)
 @admin.register(ScrapeTask)
+
+
 class ScrapeTaskAdmin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -91,6 +93,7 @@ class ScrapeTaskAdmin(admin.ModelAdmin):
         'customer',
         'internal_state',
         'os',
+        
         
     )
     filter_horizontal = ('childbots',)

@@ -46,11 +46,18 @@ import requests
 import json
 import uuid
 
+
 from django.conf import settings
 class DataHouseClient:
     def __init__(self):
-     
-        self.base_url = settings.DATA_HOUSE_URL
+        from sessionbot.models import Server
+        data_house_server = Server.objects.filter(instance_type="data_server").first()
+        if not data_house_server:
+            print("❌ datahouse server not found.")
+            return
+        
+        DATA_HOUSE_URL = data_house_server.public_ip
+        self.base_url = DATA_HOUSE_URL
         self.request_maker=requests
         
 

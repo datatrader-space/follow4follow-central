@@ -942,14 +942,39 @@ def scrape_task(request):
                     if obj:
                         obj=obj[0]
                         scrapetask.handle_scrape_task_deletion(obj)
-        elif method =='change_state':
-            tasks = data.get('data',{})
-            for task in tasks:
-                for key, value in task.items():
-                    obj=ScrapeTask.objects.filter(id=key)
-                    if obj:
-                        obj=obj[0]
-                        scrapetask.handle_scrapetask_state_change(obj)
+        elif method == 'change_state':
+            payload_data = data.get('data', {})
+            task_ids = payload_data.get('ids', [])
+            action = payload_data.get('action', '').lower()
+
+            if not task_ids or action not in ['resume', 'start', 'pause']:
+                return JsonResponse({
+                    "success": False,
+                    "error": "Missing or invalid 'ids' or 'action'. Action must be 'resume', 'start', or 'pause'."
+                }, status=400)
+
+            # Map frontend action to backend state
+            state_str = None
+            if action == 'resume':
+                state_str = 'resume'
+            elif action == 'pause':
+                state_str = 'pause'
+
+            results = []
+            total_updated = 0
+
+            for task_id in task_ids:
+                obj = ScrapeTask.objects.filter(id=task_id).first()
+                if obj:
+                    result = scrapetask.handle_scrapetask_state_change(obj, state=state_str)
+                    results.append(result)
+                    total_updated += result['updated_tasks']
+
+            return JsonResponse({
+                "success": True,
+                "message": f"{total_updated} tasks {action}d successfully across {len(results)} scrapetask(s).",
+                "results": results
+            })
 
            
 
@@ -1075,7 +1100,7 @@ def todo(request):
                     obj=Todo.objects.filter(id=key)
                     if obj:
                         obj=obj[0]
-                        todo.handle_state_change(obj)
+                        todo.handle_todo_state_change(obj)
            
 
         return JsonResponse({'status': 'success'}, status=200)
